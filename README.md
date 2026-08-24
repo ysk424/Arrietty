@@ -14,6 +14,10 @@ Arrietty は、Blender 内の世界を SteamVR HMD とサイクルトレーナ�
 
 SteamVR、OpenXR ランタイム、HMD、または Blender の OpenXR 対応を利用できない場合はエラーを表示します。
 
+## 実機受入試験
+
+2026-08-24、Blender 5.2.0 LTS、SteamVR、HTC VIVE HMD、AMD Ryzen 9 9950X3D、GeForce RTX 5070 Ti、64 GB メモリの環境で、VR セッションを開始して Blender の初期 Cube が HMD に表示されることを確認し、Version 0.1.0 を合格としました。
+
 ## 今回の範囲外
 
 Version 0.1.0 は VR セッションの開始と終了だけを実装しています。Tracker、走行、地図、Bluetooth は実装していません。
