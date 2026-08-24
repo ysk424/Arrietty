@@ -4,7 +4,7 @@
 
 """Arrietty Blender Extension entry point."""
 
-from . import gui, navigation, trainer
+from . import gui, navigation, steering, trainer
 
 
 def register() -> None:

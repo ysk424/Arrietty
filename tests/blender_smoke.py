@@ -18,11 +18,11 @@ REPOSITORY_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_DIR.parent))
 
 import Arrietty  # noqa: E402
-from Arrietty import gui, navigation, trainer  # noqa: E402
+from Arrietty import gui, navigation, steering, trainer  # noqa: E402
 
 
 assert bpy.app.version >= (5, 2, 0)
-assert gui.VERSION == "0.4.0"
+assert gui.VERSION == "0.5.0"
 manifest = tomllib.loads(
     (REPOSITORY_DIR / "blender_manifest.toml").read_text(encoding="utf-8")
 )
@@ -46,6 +46,34 @@ assert sample is not None
 assert math.isclose(sample.speed_kmh, 20.16)
 assert sample.cadence_rpm == 92.0
 assert sample.power_w == 176
+
+identity = (
+    (1.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0),
+    (0.0, 0.0, 1.0),
+)
+left_angle = math.radians(20.0)
+left_rotation = (
+    (math.cos(left_angle), 0.0, math.sin(left_angle)),
+    (0.0, 1.0, 0.0),
+    (-math.sin(left_angle), 0.0, math.cos(left_angle)),
+)
+right_angle = -math.radians(20.0)
+right_rotation = (
+    (math.cos(right_angle), 0.0, math.sin(right_angle)),
+    (0.0, 1.0, 0.0),
+    (-math.sin(right_angle), 0.0, math.cos(right_angle)),
+)
+assert math.isclose(
+    steering._world_yaw_from_delta(left_rotation, identity),
+    left_angle,
+    abs_tol=1.0e-6,
+)
+assert math.isclose(
+    steering._world_yaw_from_delta(right_rotation, identity),
+    right_angle,
+    abs_tol=1.0e-6,
+)
 
 
 class FakeLayout:
@@ -90,7 +118,7 @@ try:
         SimpleNamespace(layout=stopped_layout),
         bpy.context,
     )
-    assert stopped_layout.labels[0]["text"] == "Version v0.4.0"
+    assert stopped_layout.labels[0]["text"] == "Version v0.5.0"
     assert stopped_layout.labels[1]["text"] == "Start Pose"
     assert "Z 1.50 m" in stopped_layout.labels[2]["text"]
     assert len(stopped_layout.operators) == 2

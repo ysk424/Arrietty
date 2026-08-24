@@ -2,10 +2,11 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""CYCPLUS T2 BLE notifications and straight-course movement."""
+"""CYCPLUS T2 BLE notifications and controller-steered movement."""
 
 import asyncio
 from dataclasses import dataclass
+import math
 import queue
 import struct
 import sys
@@ -17,7 +18,7 @@ from bpy.props import FloatProperty
 from bpy.types import Operator
 from mathutils import Vector
 
-from . import navigation
+from . import navigation, steering
 
 
 FTMS_INDOOR_BIKE_DATA = "00002ad2-0000-1000-8000-00805f9b34fb"
@@ -25,6 +26,7 @@ T2_NAME_FRAGMENT = "t2"
 DEFAULT_COURSE_LENGTH_M = 100.0
 TIMER_INTERVAL_SECONDS = 0.05
 SAMPLE_STALE_SECONDS = 2.0
+PROVISIONAL_WHEELBASE_M = 1.05
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,8 @@ class _TrainerRuntime:
         self.course_length_m = DEFAULT_COURSE_LENGTH_M
         self.start_position = (0.0, 0.0)
         self.direction = (0.0, 1.0)
+        self.travel_heading = 0.0
+        self.accumulated_turn = 0.0
         self.last_sample_time = 0.0
         self.last_tick_time = 0.0
         self.signal_received = False
@@ -60,7 +64,9 @@ class _TrainerRuntime:
 
     @property
     def active(self) -> bool:
-        return self.status in {"SEARCHING", "CONNECTING", "RIDING", "STOPPING"}
+        return self.status in {
+            "SEARCHING", "CONNECTING", "WAITING_STEERING", "RIDING", "STOPPING"
+        }
 
 
 _runtime = _TrainerRuntime()
@@ -208,6 +214,13 @@ def _tag_view3d_redraw() -> None:
                 area.tag_redraw()
 
 
+def _begin_riding(now: float) -> None:
+    _runtime.status = "RIDING"
+    _runtime.message = "T2 and right controller received; steering is active"
+    _runtime.last_tick_time = now
+    _play_start_sound()
+
+
 def _handle_worker_events(now: float) -> None:
     while True:
         try:
@@ -232,23 +245,35 @@ def _handle_worker_events(now: float) -> None:
                 _runtime.power_w = max(0, sample.power_w)
             if not _runtime.signal_received:
                 _runtime.signal_received = True
-                _runtime.status = "RIDING"
-                _runtime.message = "T2 signal received; ride straight to the course end"
-                _runtime.last_tick_time = now
-                _play_start_sound()
+                if steering.is_tracking():
+                    _begin_riding(now)
+                else:
+                    _runtime.status = "WAITING_STEERING"
+                    _runtime.message = "T2 received; waiting for the right controller"
         elif event_type == "error":
             _runtime.status = "ERROR"
             _runtime.message = str(payload)
             _runtime.speed_kmh = 0.0
             if _runtime.stop_event is not None:
                 _runtime.stop_event.set()
+            steering.request_stop()
         elif event_type == "worker_stopped":
             if _runtime.status == "STOPPING":
                 _runtime.status = "IDLE"
                 _runtime.message = "Trainer stopped"
 
+    if _runtime.status == "WAITING_STEERING":
+        steering_state = steering.snapshot()
+        if steering_state.tracking:
+            _begin_riding(now)
+        elif steering_state.status == "ERROR":
+            _runtime.status = "ERROR"
+            _runtime.message = steering_state.message
+            if _runtime.stop_event is not None:
+                _runtime.stop_event.set()
 
-def _advance_straight_course(context: bpy.types.Context, now: float) -> None:
+
+def _advance_course(context: bpy.types.Context, now: float) -> None:
     if _runtime.status != "RIDING":
         _runtime.last_tick_time = now
         return
@@ -259,15 +284,36 @@ def _advance_straight_course(context: bpy.types.Context, now: float) -> None:
     if now - _runtime.last_sample_time > SAMPLE_STALE_SECONDS:
         speed_kmh = 0.0
 
+    steering_state = steering.snapshot()
+    if not steering_state.tracking:
+        _runtime.last_tick_time = now
+        _runtime.message = "Ride paused; right controller tracking was lost"
+        return
+    if _runtime.message.startswith("Ride paused"):
+        _runtime.message = "Right controller recovered; steering is active"
+
     remaining = max(0.0, _runtime.course_length_m - _runtime.distance_m)
     advance = min(speed_kmh / 3.6 * elapsed, remaining)
     if advance > 0.0:
-        _runtime.distance_m += advance
-        start_x, start_y = _runtime.start_position
-        direction_x, direction_y = _runtime.direction
+        steering_angle = steering.get_effective_angle_radians()
+        turn = advance / PROVISIONAL_WHEELBASE_M * math.tan(steering_angle)
+        midpoint_heading = _runtime.travel_heading + turn * 0.5
+        x, y = context.scene.arrietty_position
         context.scene.arrietty_position = (
-            start_x + direction_x * _runtime.distance_m,
-            start_y + direction_y * _runtime.distance_m,
+            x - math.sin(midpoint_heading) * advance,
+            y + math.cos(midpoint_heading) * advance,
+        )
+        _runtime.distance_m += advance
+        _runtime.travel_heading = navigation._normalized_angle(
+            _runtime.travel_heading + turn
+        )
+        _runtime.accumulated_turn += turn
+        _runtime.direction = (
+            -math.sin(_runtime.travel_heading),
+            math.cos(_runtime.travel_heading),
+        )
+        context.scene.arrietty_heading = navigation._normalized_angle(
+            context.scene.arrietty_heading + turn
         )
         navigation.apply_base_pose(context, reset_running=False)
 
@@ -278,6 +324,7 @@ def _advance_straight_course(context: bpy.types.Context, now: float) -> None:
         _runtime.speed_kmh = 0.0
         if _runtime.stop_event is not None:
             _runtime.stop_event.set()
+        steering.request_stop()
         _play_finish_sound()
 
 
@@ -285,7 +332,7 @@ def _timer_tick():
     """Drain worker events and update Blender data on the main thread."""
     now = time.monotonic()
     _handle_worker_events(now)
-    _advance_straight_course(bpy.context, now)
+    _advance_course(bpy.context, now)
     _tag_view3d_redraw()
 
     thread_alive = _runtime.thread is not None and _runtime.thread.is_alive()
@@ -304,7 +351,7 @@ def _ensure_timer() -> None:
 
 
 def start_trainer(context: bpy.types.Context, direction: Vector) -> None:
-    """Start a straight ride using a direction captured from the HMD."""
+    """Start a controller-steered ride using the initial HMD direction."""
     _runtime.generation += 1
     generation = _runtime.generation
     while True:
@@ -322,6 +369,8 @@ def start_trainer(context: bpy.types.Context, direction: Vector) -> None:
     _runtime.course_length_m = context.scene.arrietty_course_length
     _runtime.start_position = tuple(context.scene.arrietty_position)
     _runtime.direction = (direction.x, direction.y)
+    _runtime.travel_heading = math.atan2(-direction.x, direction.y)
+    _runtime.accumulated_turn = 0.0
     _runtime.last_sample_time = 0.0
     _runtime.last_tick_time = time.monotonic()
     _runtime.signal_received = False
@@ -332,6 +381,7 @@ def start_trainer(context: bpy.types.Context, direction: Vector) -> None:
         name="ArriettyT2BLE",
         daemon=True,
     )
+    steering.start()
     _ensure_timer()
     _runtime.thread.start()
 
@@ -340,6 +390,7 @@ def stop_trainer() -> None:
     """Request a non-blocking trainer disconnect."""
     if _runtime.stop_event is not None:
         _runtime.stop_event.set()
+    steering.request_stop()
     if _runtime.active:
         _runtime.status = "STOPPING"
         _runtime.message = "Stopping trainer"
@@ -356,7 +407,7 @@ class ARRIETTY_OT_toggle_trainer(Operator):
 
     bl_idname = "arrietty.toggle_trainer"
     bl_label = "Start or Stop CYCPLUS T2"
-    bl_description = "Connect to the T2 and ride straight, or stop the active ride"
+    bl_description = "Connect the T2 and right controller, or stop the active ride"
 
     def execute(self, context: bpy.types.Context) -> set[str]:
         if _runtime.active:
@@ -388,7 +439,7 @@ _CLASSES = (ARRIETTY_OT_toggle_trainer,)
 def _register_properties() -> None:
     bpy.types.Scene.arrietty_course_length = FloatProperty(
         name="Course Length",
-        description="Straight-line distance from the start to the course end",
+        description="Travel distance before the ride ends",
         default=DEFAULT_COURSE_LENGTH_M,
         min=1.0,
         soft_max=10000.0,
@@ -436,6 +487,7 @@ def unregister() -> None:
     thread = _runtime.thread
     if thread is not None and thread.is_alive():
         thread.join(timeout=2.0)
+    steering.stop(timeout=2.0)
     _unregister_keymaps()
     _unregister_properties()
     for cls in reversed(_CLASSES):

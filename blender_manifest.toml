@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "arrietty"
-version = "0.4.0"
+version = "0.5.0"
 name = "Arrietty"
 tagline = "Enter Blender scenes through a SteamVR headset"
 maintainer = "ysk424"
@@ -16,6 +16,7 @@ license = [
 ]
 
 wheels = [
+  "./wheels/openvr-2.12.1401-py3-none-any.whl",
   "./wheels/bleak-3.0.2-py3-none-any.whl",
   "./wheels/typing_extensions-4.16.0-py3-none-any.whl",
   "./wheels/winrt_runtime-3.2.1-cp313-cp313-win_amd64.whl",

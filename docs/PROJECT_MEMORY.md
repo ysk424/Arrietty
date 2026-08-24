@@ -1,0 +1,146 @@
+# Arrietty 開発引き継ぎ
+
+最終更新: 2026-08-24
+
+現在の安定点: Version 0.5.0 — CYCPLUS T2と右VIVEコントローラで3 m幅のオーバルトラックを1周完走
+
+## プロジェクトの最終目標
+
+Blender内へGoogle Earth由来の地理タイルを配置し、SteamVR HMDを装着してサイクルトレーナーで実寸の世界を走る。ArriettyはGPL-3.0-or-laterのBlender Extensionとして開発する。
+
+実装順序は機能を分離して進める。
+
+1. BlenderのOpenXR VRセッションへ入る／終了する
+2. HMD正面とテンキーで開始位置・方向を調整する
+3. CYCPLUS T2の速度で前進する
+4. 実機のハンドル操作で曲がる
+5. 操舵の体感を実車と一致させる
+6. Googleから地理タイルを取得・配置する
+
+GoogleタイルはVR、走行、操舵から独立した後段機能である。Blenderでは1 Blender Unit = 1 m、地面はZ=0、目の高さはZ=1.5 mとする。
+
+## 2026-08-24の実機合格点
+
+- BlenderのOpenXRセッションをSteamVR HMDで開始し、初期Cubeを確認した。
+- テンキー`4`/`6`で左右回転、`8`/`2`でHMD正面への前後移動ができた。
+- CYCPLUS T2のFTMS通知から速度・ケイデンス・パワーを受信し、100 m直進を完走した。
+- Manekkoで帽子用だったVIVE TrackerのIDを特定したが、専用受信機が必要なため操舵には使用しなかった。
+- 右VIVEコントローラを自転車のステムへ固定し、左右の姿勢を安定して受信した。
+- Version 0.5.0で幅3 m、中心線約143 mのオーバルトラックを1周完走した。
+- 操舵感には調整余地があるが、「曲がれる」「周回できる」という当日の合格条件は達成した。初期結果は想定より良好だった。
+
+## 利用環境
+
+- Blender: 5.2.0 LTS
+- Blender実行ファイル: `C:\Users\azoo\git\build_windows_Release_x64_vc17_Release\bin\blender.exe`
+- OS: Windows x64
+- CPU: AMD Ryzen 9 9950X3D
+- GPU: GeForce RTX 5070 Ti
+- メモリ: 64 GB
+- HMD: HTC VIVE
+- VRランタイム: SteamVR / OpenXR
+- サイクルトレーナー: CYCPLUS T2
+- 操舵: 右VIVEコントローラをステムへ固定
+- 開発リポジトリ: `C:\Users\azoo\git\Arrietty`
+
+## 機器IDと役割
+
+| 機器 | SteamVR/OpenVR ID | 現在の役割 |
+|---|---|---|
+| 右VIVEコントローラ | `LHR-9EFF8645` | ステムに固定して操舵入力 |
+| 左VIVEコントローラ | `LHR-0B253252` | Arriettyでは未使用 |
+| Manekkoの帽子用Tracker | `LHR-CC5F5D2C` | 今回は不採用。専用受信機が必要 |
+
+右コントローラの機種名はOpenVR上で`VIVE Controller Pro MV`。実機テストでは100回中100回の有効姿勢を受信した。中央から右は約-21.2°、中央から左は約+15.4°、右端から左端は約37.7°だった。
+
+右コントローラはハンドル回転軸から約15–20 cm先のステムに固定されている。現在の操舵は位置ではなく相対回転を使うため、この距離の位置補正は不要である。
+
+## 入力と出力の分担
+
+- HMD表示: Blender OpenXR → SteamVR → HTC VIVE
+- HMD正面: Blenderが保持するOpenXR viewer poseを、テンキー操作時と走行開始時に読む
+- 操舵: OpenVRから右コントローラ姿勢を走行中だけ60 Hzで読む
+- 速度・ケイデンス・パワー: CYCPLUS T2のBluetooth FTMS通知をBleakでプッシュ受信する
+- 手動調整: テンキー
+- IC-KP09: 将来の外部キー入力候補。現在は未実装
+- Polar心拍計: 電源・受信候補の確認まで。現在は未実装
+
+T2は通知受信なのでBluetooth値のポーリングをしない。コントローラ姿勢は連続量のため、走行中だけOpenVRで取得し、停止時には読み取りスレッドも終了する。
+
+## 座標と方向
+
+### Blender / HMD
+
+- Blenderは右手系、Z-up、1 unit = 1 m。
+- 地面はZ=0、XR base poseの高さは常にZ=1.5 m。
+- HMD正面はOpenXR viewer poseのローカル`-Z`軸をBlender XY平面へ投影して使う。
+- 走行中のXR base pose位置と角度だけを更新し、Z方向へは移動しない。
+
+### 右コントローラ
+
+- SteamVRはY-up。
+- テンキー`0`を押した後、最初の有効姿勢をハンドル中央として記録する。
+- 現在姿勢を`R_current`、中央姿勢を`R_center`とし、`R_current @ R_center.T`で取り付け角を除去する。
+- SteamVR世界Y軸まわりの相対角を操舵角にする。
+- 正が左、負が右。実機テストで符号を確認済み。
+
+## Version 0.5.0の暫定操舵値
+
+これらは「まず曲がる」ための初期値であり、次回の体感調整対象。
+
+- 仮ホイールベース: 1.05 m
+- ハンドル角から前輪操舵角へのゲイン: 0.35
+- 中央デッドゾーン: 1.5°
+- 適用操舵角の上限: ±15°
+- コントローラ取得: 60 Hz
+- 平滑化: 1サンプルごとに新値を25%反映
+- Blender移動更新: 20 Hz
+- 追跡タイムアウト: 0.5秒
+- 移動モデル: `turn = distance / wheelbase * tan(steering_angle)`
+
+コントローラ追跡を失うと移動を一時停止し、再受信すると再開する。
+
+## 操作手順
+
+1. SteamVR、HMD、右コントローラを起動する。
+2. 右コントローラをステムへ固定し、ハンドルを中央にする。
+3. Blenderで`test_data/arrietty_3m_track.blend`を開く。
+4. Arriettyパネルの「Dive into Secret World」でVRを開始する。
+5. コース正面を向く。
+6. T2を数回漕いで起こす。
+7. ハンドルを中央に保ったままテンキー`0`を押す。
+8. T2と右コントローラの両方が受信されると開始音が鳴る。
+9. 開始音の後に走行する。テンキー`0`をもう一度押すと中止する。
+
+周回テストシーンは開始位置`(0, -10, 1.5)`、開始方向`+X`。最初の左カーブは約20 m先にある。走行終了距離は143 m。
+
+## 保存済みテストデータと配布物
+
+- `test_data/arrietty_3m_track.blend`: 幅3 m、約143 mのオーバルトラック
+- `test_data/arrietty_straight_100m.blend`: 幅3 m、100 mの直線
+- `arrietty-0.5.0.zip`: ローカルで生成したBlender Extensionパッケージ
+
+ZIPのローカルパス:
+
+`C:\Users\azoo\git\Arrietty\arrietty-0.5.0.zip`
+
+## 次回の作業順序
+
+1. 器材の充電と必要器材の準備を完了する。
+2. 実車の感覚と比較しながら、操舵ゲイン、ホイールベース、デッドゾーン、平滑化を調整する。
+3. 中央付近、カーブ進入、カーブ保持、切り返しの順に確認する。
+4. 操舵の体感が一致したら、その状態をcommit・pushする。
+5. その後にGoogle由来の地理タイル取得・Blender配置へ進む。
+
+Googleタイル実装時は、API、利用規約、キャッシュ、座標参照系、原点移動、実寸スケールを操舵系とは別モジュールとして扱う。
+
+## 現在は実装しないもの
+
+- VIVE Trackerによる操舵
+- コース中心線への自動追従
+- Polar心拍連動
+- IC-KP09入力
+- Googleタイル取得・配置
+- Bluetooth負荷制御
+
+既存の周回成功状態を壊さず、まず操舵感の調整を完了してから次の機能へ進む。

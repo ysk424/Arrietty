@@ -9,10 +9,10 @@ import math
 import bpy
 from bpy.types import Operator, Panel
 
-from . import navigation, trainer
+from . import navigation, steering, trainer
 
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 
 def _has_openxr_support() -> bool:
@@ -132,7 +132,7 @@ class ARRIETTY_PT_vr_session(Panel):
         trainer_box.prop(context.scene, "arrietty_course_length", text="Course")
         trainer_box.operator(
             trainer.ARRIETTY_OT_toggle_trainer.bl_idname,
-            text="Stop Ride" if runtime.active else "Start Straight Ride (Numpad 0)",
+            text="Stop Ride" if runtime.active else "Start Ride (Numpad 0)",
             icon="CANCEL" if runtime.active else "PLAY",
             depress=runtime.active,
         )
@@ -147,6 +147,19 @@ class ARRIETTY_PT_vr_session(Panel):
         trainer_box.label(
             text=f"Distance {runtime.distance_m:.1f} / {runtime.course_length_m:.1f} m"
         )
+
+        steering_state = steering.snapshot()
+        steering_box = layout.box()
+        steering_box.label(text="Right Controller Steering")
+        steering_box.label(text=f"Status: {steering_state.status}")
+        steering_box.label(text=steering_state.message)
+        steering_box.label(
+            text=(
+                f"Raw {steering_state.raw_angle_degrees:+.1f} degrees   "
+                f"Applied {steering_state.effective_angle_degrees:+.1f} degrees"
+            )
+        )
+        steering_box.label(text=f"ID: {steering_state.serial}")
 
         if not _has_openxr_support():
             error_box = layout.box()
