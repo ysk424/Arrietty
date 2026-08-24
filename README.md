@@ -1,19 +1,28 @@
 # Arrietty
 
-Arrietty は、地理空間タイルを Blender 内の世界として扱い、SteamVR HMD とサイクルトレーナーでその中を走ることを目指す Blender Extension プロジェクトです。
+Arrietty は、Blender 内の世界を SteamVR HMD とサイクルトレーナーで走る GPL-3.0-or-later の Blender Extension です。
 
-## 開発状況
+## Version 0.1.0
 
-開発を開始したばかりです。現在は Extension の最小構成だけで、利用できる機能はまだありません。
+3D Viewport のサイドバーにある「Arrietty」タブから、Blender の OpenXR VR セッションを開始・終了できます。
 
-## 最終的な構想
+1. SteamVR を起動し、使用する HMD を接続します。
+2. SteamVR をアクティブな OpenXR ランタイムに設定します。
+3. 3D Viewport で `N` キーを押し、「Arrietty」タブを開きます。
+4. 「Dive into Secret World」で VR を開始します。
+5. 「Back to Real World」で VR を終了します。
 
-- Google Earth のタイルを、提供元の利用条件と必要な権利を守って取得する
-- タイルを Blender のシーンへ配置・表示する
-- SteamVR HMD でシーンへ入る
-- サイクルトレーナーの入力でシーン内を走行する
+SteamVR、OpenXR ランタイム、HMD、または Blender の OpenXR 対応を利用できない場合はエラーを表示します。
 
-API、データ形式、対応機器、利用する外部プロジェクトは、調査後に決定します。外部プロジェクトを取り込む際は、それぞれのライセンスと著作権表示を確認します。
+## 今回の範囲外
+
+Version 0.1.0 は VR セッションの開始と終了だけを実装しています。Tracker、走行、地図、Bluetooth は実装していません。
+
+## 動作対象
+
+- Blender 5.2 LTS
+- SteamVR / OpenXR
+- HTC VIVE HMD
 
 ## ライセンス
 

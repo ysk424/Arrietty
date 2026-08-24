@@ -2,15 +2,16 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Arrietty Blender Extension.
+"""Arrietty Blender Extension entry point."""
 
-The project is in its initial scaffolding stage.
-"""
+from . import gui
 
 
 def register() -> None:
     """Register the extension."""
+    gui.register()
 
 
 def unregister() -> None:
     """Unregister the extension."""
+    gui.unregister()
