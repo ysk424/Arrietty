@@ -23,8 +23,6 @@ _KEYMAP_ITEMS = (
     ("NUMPAD_2", "MOVE_BACKWARD"),
 )
 _addon_keymaps = []
-_session_yaw_offset = None
-_session_state_pointer = None
 
 
 def _normalized_angle(angle: float) -> float:
@@ -40,49 +38,32 @@ def _is_vr_session_running(context: bpy.types.Context) -> bool:
         return False
 
 
-def reset_session_calibration() -> None:
-    """Forget the HMD-to-body yaw calibration for the current XR session."""
-    global _session_yaw_offset, _session_state_pointer
-    _session_yaw_offset = None
-    _session_state_pointer = None
-
-
-def _heading_from_viewer_rotation(rotation) -> float | None:
-    """Return the horizontal heading of Blender's XR viewer forward axis."""
+def _forward_from_viewer_rotation(rotation) -> Vector | None:
+    """Return Blender's normalized XR viewer-forward axis on the XY plane."""
     forward = Quaternion(rotation) @ Vector((0.0, 0.0, -1.0))
-    if forward.x * forward.x + forward.y * forward.y < 1.0e-8:
+    forward.z = 0.0
+    if forward.length_squared < 1.0e-8:
         return None
-    return math.atan2(-forward.x, forward.y)
+    forward.normalize()
+    return forward
 
 
-def _movement_heading(context: bpy.types.Context, body_heading: float) -> float:
-    """Combine body heading with a once-per-session HMD yaw calibration."""
-    global _session_yaw_offset, _session_state_pointer
-
+def get_hmd_forward(context: bpy.types.Context) -> Vector | None:
+    """Return the current HMD forward direction projected onto the ground."""
     if not _is_vr_session_running(context):
-        reset_session_calibration()
-        return body_heading
-
+        return None
     state = context.window_manager.xr_session_state
     if state is None:
-        return body_heading
+        return None
+    return _forward_from_viewer_rotation(state.viewer_pose_rotation)
 
-    try:
-        state_pointer = state.as_pointer()
-    except AttributeError:
-        state_pointer = id(state)
 
-    if _session_state_pointer != state_pointer:
-        _session_yaw_offset = None
-        _session_state_pointer = state_pointer
-
-    if _session_yaw_offset is None:
-        viewer_heading = _heading_from_viewer_rotation(state.viewer_pose_rotation)
-        if viewer_heading is None:
-            return body_heading
-        _session_yaw_offset = _normalized_angle(viewer_heading - body_heading)
-
-    return _normalized_angle(body_heading + _session_yaw_offset)
+def _movement_forward(context: bpy.types.Context, body_heading: float) -> Vector:
+    """Use live HMD forward in VR, or body heading before the session starts."""
+    hmd_forward = get_hmd_forward(context)
+    if hmd_forward is not None:
+        return hmd_forward
+    return Vector((-math.sin(body_heading), math.cos(body_heading), 0.0))
 
 
 def apply_base_pose(context: bpy.types.Context, *, reset_running: bool = True) -> None:
@@ -122,7 +103,7 @@ class ARRIETTY_OT_navigate(Operator):
     def execute(self, context: bpy.types.Context) -> set[str]:
         scene = context.scene
         heading = scene.arrietty_heading
-        movement_heading = _movement_heading(context, heading)
+        movement_forward = _movement_forward(context, heading)
 
         if self.action == "TURN_LEFT":
             heading += scene.arrietty_turn_step
@@ -133,8 +114,8 @@ class ARRIETTY_OT_navigate(Operator):
             distance = direction * scene.arrietty_move_step
             x, y = scene.arrietty_position
             scene.arrietty_position = (
-                x - math.sin(movement_heading) * distance,
-                y + math.cos(movement_heading) * distance,
+                x + movement_forward.x * distance,
+                y + movement_forward.y * distance,
             )
         else:
             self.report({"ERROR"}, f"Unknown navigation action: {self.action}")
@@ -226,7 +207,6 @@ def register() -> None:
 
 def unregister() -> None:
     """Unregister navigation in reverse dependency order."""
-    reset_session_calibration()
     _unregister_keymaps()
     _unregister_properties()
     for cls in reversed(_CLASSES):

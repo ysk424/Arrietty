@@ -22,7 +22,7 @@ from Arrietty import gui, navigation  # noqa: E402
 
 
 assert bpy.app.version >= (5, 2, 0)
-assert gui.VERSION == "0.2.0"
+assert gui.VERSION == "0.3.0"
 manifest = tomllib.loads(
     (REPOSITORY_DIR / "blender_manifest.toml").read_text(encoding="utf-8")
 )
@@ -35,11 +35,11 @@ viewer_rotation = Quaternion((0.0, 0.0, 1.0), -math.pi / 2.0) @ Quaternion(
     (1.0, 0.0, 0.0),
     math.pi / 2.0,
 )
-assert math.isclose(
-    navigation._heading_from_viewer_rotation(viewer_rotation),
-    -math.pi / 2.0,
-    abs_tol=1.0e-6,
-)
+viewer_forward = navigation._forward_from_viewer_rotation(viewer_rotation)
+assert viewer_forward is not None
+assert math.isclose(viewer_forward.x, 1.0, abs_tol=1.0e-6)
+assert math.isclose(viewer_forward.y, 0.0, abs_tol=1.0e-6)
+assert viewer_forward.z == 0.0
 
 
 class FakeLayout:
@@ -82,7 +82,7 @@ try:
         SimpleNamespace(layout=stopped_layout),
         bpy.context,
     )
-    assert stopped_layout.labels[0]["text"] == "Version v0.2.0"
+    assert stopped_layout.labels[0]["text"] == "Version v0.3.0"
     assert stopped_layout.labels[1]["text"] == "Start Pose"
     assert "Z 1.50 m" in stopped_layout.labels[2]["text"]
     assert len(stopped_layout.operators) == 1

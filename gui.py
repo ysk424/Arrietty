@@ -12,7 +12,7 @@ from bpy.types import Operator, Panel
 from . import navigation
 
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 def _has_openxr_support() -> bool:
@@ -52,7 +52,6 @@ class ARRIETTY_OT_toggle_vr_session(Operator):
             return {"CANCELLED"}
 
         was_running = _is_vr_session_running(context)
-        navigation.reset_session_calibration()
 
         if not was_running:
             navigation.apply_base_pose(context, reset_running=False)
@@ -120,7 +119,11 @@ class ARRIETTY_PT_vr_session(Panel):
         controls = layout.box()
         controls.label(text="Numpad 8 / 2: Forward / Back")
         controls.label(text="Numpad 4 / 6: Turn Left / Right")
-        controls.label(text="HMD forward calibrates on first key")
+        controls.label(text="Forward follows the current HMD view")
+
+        hmd_forward = navigation.get_hmd_forward(context)
+        if hmd_forward is not None:
+            controls.label(text=f"HMD Forward X {hmd_forward.x:.3f}  Y {hmd_forward.y:.3f}")
 
         if not _has_openxr_support():
             error_box = layout.box()
