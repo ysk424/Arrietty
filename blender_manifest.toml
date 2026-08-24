@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "arrietty"
-version = "0.1.0"
+version = "0.2.0"
 name = "Arrietty"
 tagline = "Enter Blender scenes through a SteamVR headset"
 maintainer = "ysk424"
@@ -22,5 +22,6 @@ paths_exclude_pattern = [
   "/.vscode/",
   "/.idea/",
   "/tests/",
+  "/test_data/",
   "/*.zip",
 ]

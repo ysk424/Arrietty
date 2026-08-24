@@ -5,22 +5,24 @@
 """Registration smoke test executed with Blender in background mode."""
 
 from pathlib import Path
+import math
 import sys
 import tomllib
 from types import SimpleNamespace
 
 import bpy
+from mathutils import Quaternion
 
 
 REPOSITORY_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_DIR.parent))
 
 import Arrietty  # noqa: E402
-from Arrietty import gui  # noqa: E402
+from Arrietty import gui, navigation  # noqa: E402
 
 
 assert bpy.app.version >= (5, 2, 0)
-assert gui.VERSION == "0.1.0"
+assert gui.VERSION == "0.2.0"
 manifest = tomllib.loads(
     (REPOSITORY_DIR / "blender_manifest.toml").read_text(encoding="utf-8")
 )
@@ -28,6 +30,16 @@ assert manifest["version"] == gui.VERSION
 assert gui.ARRIETTY_PT_vr_session.bl_space_type == "VIEW_3D"
 assert gui.ARRIETTY_PT_vr_session.bl_region_type == "UI"
 assert gui.ARRIETTY_PT_vr_session.bl_category == "Arrietty"
+
+viewer_rotation = Quaternion((0.0, 0.0, 1.0), -math.pi / 2.0) @ Quaternion(
+    (1.0, 0.0, 0.0),
+    math.pi / 2.0,
+)
+assert math.isclose(
+    navigation._heading_from_viewer_rotation(viewer_rotation),
+    -math.pi / 2.0,
+    abs_tol=1.0e-6,
+)
 
 
 class FakeLayout:
@@ -49,19 +61,35 @@ class FakeLayout:
     def box(self):
         return self
 
+    def row(self, **_kwargs):
+        return self
 
-stopped_layout = FakeLayout()
-gui.ARRIETTY_PT_vr_session.draw(
-    SimpleNamespace(layout=stopped_layout),
-    bpy.context,
-)
-assert [label["text"] for label in stopped_layout.labels] == ["Version v0.1.0"]
-assert len(stopped_layout.operators) == 1
-assert stopped_layout.operators[0][1]["text"] == "Dive into Secret World"
+    def prop(self, *_args, **_kwargs) -> None:
+        pass
 
-original_is_running = gui._is_vr_session_running
-gui._is_vr_session_running = lambda _context: True
+
+Arrietty.register()
 try:
+    assert hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
+    assert hasattr(bpy.types, "ARRIETTY_OT_navigate")
+    assert hasattr(bpy.types, "ARRIETTY_PT_vr_session")
+    assert hasattr(bpy.ops.arrietty, "toggle_vr_session")
+    assert hasattr(bpy.ops.arrietty, "navigate")
+    assert hasattr(bpy.ops.wm, "xr_session_toggle")
+
+    stopped_layout = FakeLayout()
+    gui.ARRIETTY_PT_vr_session.draw(
+        SimpleNamespace(layout=stopped_layout),
+        bpy.context,
+    )
+    assert stopped_layout.labels[0]["text"] == "Version v0.2.0"
+    assert stopped_layout.labels[1]["text"] == "Start Pose"
+    assert "Z 1.50 m" in stopped_layout.labels[2]["text"]
+    assert len(stopped_layout.operators) == 1
+    assert stopped_layout.operators[0][1]["text"] == "Dive into Secret World"
+
+    original_is_running = gui._is_vr_session_running
+    gui._is_vr_session_running = lambda _context: True
     running_layout = FakeLayout()
     gui.ARRIETTY_PT_vr_session.draw(
         SimpleNamespace(layout=running_layout),
@@ -69,12 +97,10 @@ try:
     )
     assert len(running_layout.operators) == 1
     assert running_layout.operators[0][1]["text"] == "Back to Real World"
-finally:
     gui._is_vr_session_running = original_is_running
 
-original_has_openxr_support = gui._has_openxr_support
-gui._has_openxr_support = lambda: False
-try:
+    original_has_openxr_support = gui._has_openxr_support
+    gui._has_openxr_support = lambda: False
     reports = []
     result = gui.ARRIETTY_OT_toggle_vr_session.execute(
         SimpleNamespace(report=lambda level, message: reports.append((level, message))),
@@ -84,13 +110,11 @@ try:
     assert reports == [
         ({"ERROR"}, "OpenXR support is unavailable in this Blender build")
     ]
-finally:
     gui._has_openxr_support = original_has_openxr_support
 
-original_toggle_xr_session = gui._toggle_xr_session
-gui._has_openxr_support = lambda: True
-gui._toggle_xr_session = lambda: {"CANCELLED"}
-try:
+    original_toggle_xr_session = gui._toggle_xr_session
+    gui._has_openxr_support = lambda: True
+    gui._toggle_xr_session = lambda: {"CANCELLED"}
     reports = []
     result = gui.ARRIETTY_OT_toggle_vr_session.execute(
         SimpleNamespace(report=lambda level, message: reports.append((level, message))),
@@ -104,20 +128,35 @@ try:
             "OpenXR runtime, and connect the HMD",
         )
     ]
-finally:
     gui._has_openxr_support = original_has_openxr_support
     gui._toggle_xr_session = original_toggle_xr_session
 
-Arrietty.register()
-try:
-    assert hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
-    assert hasattr(bpy.types, "ARRIETTY_PT_vr_session")
-    assert hasattr(bpy.ops.arrietty, "toggle_vr_session")
-    assert hasattr(bpy.ops.wm, "xr_session_toggle")
+    scene = bpy.context.scene
+    scene.arrietty_position = (0.0, 0.0)
+    scene.arrietty_heading = 0.0
+    scene.arrietty_move_step = 0.5
+    scene.arrietty_turn_step = math.radians(5.0)
+
+    assert bpy.ops.arrietty.navigate(action="MOVE_FORWARD") == {"FINISHED"}
+    assert tuple(scene.arrietty_position) == (0.0, 0.5)
+    assert bpy.context.window_manager.xr_session_settings.base_pose_type == "CUSTOM"
+    assert tuple(bpy.context.window_manager.xr_session_settings.base_pose_location) == (
+        0.0,
+        0.5,
+        navigation.EYE_HEIGHT_M,
+    )
+
+    assert bpy.ops.arrietty.navigate(action="TURN_LEFT") == {"FINISHED"}
+    assert math.isclose(
+        scene.arrietty_heading,
+        math.radians(5.0),
+        abs_tol=1.0e-6,
+    )
 finally:
     Arrietty.unregister()
 
 assert not hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
+assert not hasattr(bpy.types, "ARRIETTY_OT_navigate")
 assert not hasattr(bpy.types, "ARRIETTY_PT_vr_session")
 
 print("Arrietty Blender smoke test passed")

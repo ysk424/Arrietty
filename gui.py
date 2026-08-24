@@ -4,11 +4,15 @@
 
 """Arrietty controls in the 3D Viewport sidebar."""
 
+import math
+
 import bpy
 from bpy.types import Operator, Panel
 
+from . import navigation
 
-VERSION = "0.1.0"
+
+VERSION = "0.2.0"
 
 
 def _has_openxr_support() -> bool:
@@ -48,6 +52,10 @@ class ARRIETTY_OT_toggle_vr_session(Operator):
             return {"CANCELLED"}
 
         was_running = _is_vr_session_running(context)
+        navigation.reset_session_calibration()
+
+        if not was_running:
+            navigation.apply_base_pose(context, reset_running=False)
 
         try:
             result = _toggle_xr_session()
@@ -97,6 +105,22 @@ class ARRIETTY_PT_vr_session(Panel):
             icon=icon,
             depress=is_running,
         )
+
+        layout.separator()
+        layout.label(text="Start Pose")
+        x, y = context.scene.arrietty_position
+        heading = math.degrees(context.scene.arrietty_heading)
+        layout.label(text=f"X {x:.2f} m   Y {y:.2f} m   Z {navigation.EYE_HEIGHT_M:.2f} m")
+        layout.label(text=f"Direction {heading:.1f} degrees")
+
+        row = layout.row(align=True)
+        row.prop(context.scene, "arrietty_move_step", text="Move")
+        row.prop(context.scene, "arrietty_turn_step", text="Turn")
+
+        controls = layout.box()
+        controls.label(text="Numpad 8 / 2: Forward / Back")
+        controls.label(text="Numpad 4 / 6: Turn Left / Right")
+        controls.label(text="HMD forward calibrates on first key")
 
         if not _has_openxr_support():
             error_box = layout.box()
