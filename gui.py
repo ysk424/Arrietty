@@ -9,10 +9,10 @@ import math
 import bpy
 from bpy.types import Operator, Panel
 
-from . import navigation
+from . import navigation, trainer
 
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 def _has_openxr_support() -> bool:
@@ -124,6 +124,29 @@ class ARRIETTY_PT_vr_session(Panel):
         hmd_forward = navigation.get_hmd_forward(context)
         if hmd_forward is not None:
             controls.label(text=f"HMD Forward X {hmd_forward.x:.3f}  Y {hmd_forward.y:.3f}")
+
+        layout.separator()
+        runtime = trainer.get_runtime()
+        trainer_box = layout.box()
+        trainer_box.label(text="CYCPLUS T2")
+        trainer_box.prop(context.scene, "arrietty_course_length", text="Course")
+        trainer_box.operator(
+            trainer.ARRIETTY_OT_toggle_trainer.bl_idname,
+            text="Stop Ride" if runtime.active else "Start Straight Ride (Numpad 0)",
+            icon="CANCEL" if runtime.active else "PLAY",
+            depress=runtime.active,
+        )
+        trainer_box.label(text=f"Status: {runtime.status}")
+        trainer_box.label(text=runtime.message)
+        trainer_box.label(
+            text=(
+                f"{runtime.speed_kmh:.2f} km/h   "
+                f"{runtime.cadence_rpm:.0f} rpm   {runtime.power_w} W"
+            )
+        )
+        trainer_box.label(
+            text=f"Distance {runtime.distance_m:.1f} / {runtime.course_length_m:.1f} m"
+        )
 
         if not _has_openxr_support():
             error_box = layout.box()

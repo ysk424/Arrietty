@@ -18,11 +18,11 @@ REPOSITORY_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_DIR.parent))
 
 import Arrietty  # noqa: E402
-from Arrietty import gui, navigation  # noqa: E402
+from Arrietty import gui, navigation, trainer  # noqa: E402
 
 
 assert bpy.app.version >= (5, 2, 0)
-assert gui.VERSION == "0.3.0"
+assert gui.VERSION == "0.4.0"
 manifest = tomllib.loads(
     (REPOSITORY_DIR / "blender_manifest.toml").read_text(encoding="utf-8")
 )
@@ -40,6 +40,12 @@ assert viewer_forward is not None
 assert math.isclose(viewer_forward.x, 1.0, abs_tol=1.0e-6)
 assert math.isclose(viewer_forward.y, 0.0, abs_tol=1.0e-6)
 assert viewer_forward.z == 0.0
+
+sample = trainer._parse_indoor_bike_data(bytes.fromhex("44 00 e0 07 b8 00 b0 00"))
+assert sample is not None
+assert math.isclose(sample.speed_kmh, 20.16)
+assert sample.cadence_rpm == 92.0
+assert sample.power_w == 176
 
 
 class FakeLayout:
@@ -72,9 +78,11 @@ Arrietty.register()
 try:
     assert hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
     assert hasattr(bpy.types, "ARRIETTY_OT_navigate")
+    assert hasattr(bpy.types, "ARRIETTY_OT_toggle_trainer")
     assert hasattr(bpy.types, "ARRIETTY_PT_vr_session")
     assert hasattr(bpy.ops.arrietty, "toggle_vr_session")
     assert hasattr(bpy.ops.arrietty, "navigate")
+    assert hasattr(bpy.ops.arrietty, "toggle_trainer")
     assert hasattr(bpy.ops.wm, "xr_session_toggle")
 
     stopped_layout = FakeLayout()
@@ -82,10 +90,10 @@ try:
         SimpleNamespace(layout=stopped_layout),
         bpy.context,
     )
-    assert stopped_layout.labels[0]["text"] == "Version v0.3.0"
+    assert stopped_layout.labels[0]["text"] == "Version v0.4.0"
     assert stopped_layout.labels[1]["text"] == "Start Pose"
     assert "Z 1.50 m" in stopped_layout.labels[2]["text"]
-    assert len(stopped_layout.operators) == 1
+    assert len(stopped_layout.operators) == 2
     assert stopped_layout.operators[0][1]["text"] == "Dive into Secret World"
 
     original_is_running = gui._is_vr_session_running
@@ -95,7 +103,7 @@ try:
         SimpleNamespace(layout=running_layout),
         bpy.context,
     )
-    assert len(running_layout.operators) == 1
+    assert len(running_layout.operators) == 2
     assert running_layout.operators[0][1]["text"] == "Back to Real World"
     gui._is_vr_session_running = original_is_running
 
@@ -157,6 +165,7 @@ finally:
 
 assert not hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
 assert not hasattr(bpy.types, "ARRIETTY_OT_navigate")
+assert not hasattr(bpy.types, "ARRIETTY_OT_toggle_trainer")
 assert not hasattr(bpy.types, "ARRIETTY_PT_vr_session")
 
 print("Arrietty Blender smoke test passed")

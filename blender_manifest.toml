@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "arrietty"
-version = "0.3.0"
+version = "0.4.0"
 name = "Arrietty"
 tagline = "Enter Blender scenes through a SteamVR headset"
 maintainer = "ysk424"
@@ -9,10 +9,28 @@ type = "add-on"
 website = "https://github.com/ysk424/Arrietty"
 
 blender_version_min = "5.2.0"
+platforms = ["windows-x64"]
 
 license = [
   "SPDX:GPL-3.0-or-later",
 ]
+
+wheels = [
+  "./wheels/bleak-3.0.2-py3-none-any.whl",
+  "./wheels/typing_extensions-4.16.0-py3-none-any.whl",
+  "./wheels/winrt_runtime-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_devices_bluetooth-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_devices_bluetooth_advertisement-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_devices_bluetooth_genericattributeprofile-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_devices_enumeration-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_devices_radios-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_foundation-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_foundation_collections-3.2.1-cp313-cp313-win_amd64.whl",
+  "./wheels/winrt_windows_storage_streams-3.2.1-cp313-cp313-win_amd64.whl",
+]
+
+[permissions]
+network = "Connect to the CYCPLUS T2 trainer over Bluetooth Low Energy"
 
 [build]
 paths_exclude_pattern = [

@@ -4,16 +4,18 @@
 
 """Arrietty Blender Extension entry point."""
 
-from . import gui, navigation
+from . import gui, navigation, trainer
 
 
 def register() -> None:
     """Register the extension."""
     navigation.register()
+    trainer.register()
     gui.register()
 
 
 def unregister() -> None:
     """Unregister the extension."""
     gui.unregister()
+    trainer.unregister()
     navigation.unregister()
