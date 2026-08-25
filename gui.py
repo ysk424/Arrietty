@@ -9,10 +9,10 @@ import math
 import bpy
 from bpy.types import Operator, Panel
 
-from . import navigation, steering, trainer
+from . import flight, navigation, steering, trainer
 
 
-VERSION = "0.5.0"
+VERSION = "0.6.2"
 
 
 def _has_openxr_support() -> bool:
@@ -109,7 +109,8 @@ class ARRIETTY_PT_vr_session(Panel):
         layout.label(text="Start Pose")
         x, y = context.scene.arrietty_position
         heading = math.degrees(context.scene.arrietty_heading)
-        layout.label(text=f"X {x:.2f} m   Y {y:.2f} m   Z {navigation.EYE_HEIGHT_M:.2f} m")
+        eye_height_m = navigation.EYE_HEIGHT_M + context.scene.arrietty_altitude
+        layout.label(text=f"X {x:.2f} m   Y {y:.2f} m   Z {eye_height_m:.2f} m")
         layout.label(text=f"Direction {heading:.1f} degrees")
 
         row = layout.row(align=True)
@@ -119,7 +120,7 @@ class ARRIETTY_PT_vr_session(Panel):
         controls = layout.box()
         controls.label(text="Numpad 8 / 2: Forward / Back")
         controls.label(text="Numpad 4 / 6: Turn Left / Right")
-        controls.label(text="Forward follows the current HMD view")
+        controls.label(text="Numpad 8 / 2 follows the current HMD view")
 
         hmd_forward = navigation.get_hmd_forward(context)
         if hmd_forward is not None:
@@ -129,6 +130,7 @@ class ARRIETTY_PT_vr_session(Panel):
         runtime = trainer.get_runtime()
         trainer_box = layout.box()
         trainer_box.label(text="CYCPLUS T2")
+        trainer_box.label(text="Ride direction follows Start Direction, not HMD view")
         trainer_box.prop(context.scene, "arrietty_course_length", text="Course")
         trainer_box.operator(
             trainer.ARRIETTY_OT_toggle_trainer.bl_idname,
@@ -146,6 +148,29 @@ class ARRIETTY_PT_vr_session(Panel):
         )
         trainer_box.label(
             text=f"Distance {runtime.distance_m:.1f} / {runtime.course_length_m:.1f} m"
+        )
+        completed_laps, total_laps = trainer.lap_counts(
+            runtime.distance_m,
+            runtime.course_length_m,
+        )
+        trainer_box.label(text=f"Laps {completed_laps} / {total_laps}")
+
+        flight_state = flight.snapshot()
+        trainer_box.operator(
+            flight.ARRIETTY_OT_toggle_flight_mode.bl_idname,
+            text=(
+                "Return to Ground (Numpad Enter)"
+                if flight_state.enabled
+                else "Enable Flight (Numpad Enter)"
+            ),
+            icon="TRIA_DOWN" if flight_state.enabled else "TRIA_UP",
+            depress=flight_state.enabled,
+        )
+        trainer_box.label(
+            text=(
+                f"Mode: {'FLIGHT' if flight_state.enabled else 'GROUND'}   "
+                f"Altitude {flight_state.altitude_m:.1f} m"
+            )
         )
 
         steering_state = steering.snapshot()

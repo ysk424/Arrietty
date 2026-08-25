@@ -16,14 +16,14 @@ import time
 import bpy
 from bpy.props import FloatProperty
 from bpy.types import Operator
-from mathutils import Vector
 
-from . import navigation, steering
+from . import flight, navigation, steering
 
 
 FTMS_INDOOR_BIKE_DATA = "00002ad2-0000-1000-8000-00805f9b34fb"
 T2_NAME_FRAGMENT = "t2"
-DEFAULT_COURSE_LENGTH_M = 100.0
+OVAL_LAP_LENGTH_M = 143.0
+DEFAULT_COURSE_LENGTH_M = OVAL_LAP_LENGTH_M * 4.0
 TIMER_INTERVAL_SECONDS = 0.05
 SAMPLE_STALE_SECONDS = 2.0
 PROVISIONAL_WHEELBASE_M = 1.05
@@ -71,6 +71,15 @@ class _TrainerRuntime:
 
 _runtime = _TrainerRuntime()
 _addon_keymaps = []
+
+
+def lap_counts(distance_m: float, course_length_m: float) -> tuple[int, int]:
+    """Return completed and planned 143 m oval laps for the ride distance."""
+    total_laps = max(1, math.ceil(course_length_m / OVAL_LAP_LENGTH_M))
+    if distance_m >= course_length_m - 1.0e-6:
+        return total_laps, total_laps
+    completed_laps = min(int(distance_m / OVAL_LAP_LENGTH_M), total_laps)
+    return completed_laps, total_laps
 
 
 def _take_unsigned(data: bytes | bytearray, offset: int, size: int):
@@ -221,7 +230,7 @@ def _begin_riding(now: float) -> None:
     _play_start_sound()
 
 
-def _handle_worker_events(now: float) -> None:
+def _handle_worker_events(context: bpy.types.Context, now: float) -> None:
     while True:
         try:
             generation, event_type, payload = _runtime.events.get_nowait()
@@ -257,6 +266,8 @@ def _handle_worker_events(now: float) -> None:
             if _runtime.stop_event is not None:
                 _runtime.stop_event.set()
             steering.request_stop()
+            if flight.reset(context):
+                navigation.apply_base_pose(context, reset_running=False)
         elif event_type == "worker_stopped":
             if _runtime.status == "STOPPING":
                 _runtime.status = "IDLE"
@@ -271,6 +282,8 @@ def _handle_worker_events(now: float) -> None:
             _runtime.message = steering_state.message
             if _runtime.stop_event is not None:
                 _runtime.stop_event.set()
+            if flight.reset(context):
+                navigation.apply_base_pose(context, reset_running=False)
 
 
 def _advance_course(context: bpy.types.Context, now: float) -> None:
@@ -292,6 +305,8 @@ def _advance_course(context: bpy.types.Context, now: float) -> None:
     if _runtime.message.startswith("Ride paused"):
         _runtime.message = "Right controller recovered; steering is active"
 
+    altitude_changed = flight.update_altitude(context, speed_kmh)
+
     remaining = max(0.0, _runtime.course_length_m - _runtime.distance_m)
     advance = min(speed_kmh / 3.6 * elapsed, remaining)
     if advance > 0.0:
@@ -300,21 +315,19 @@ def _advance_course(context: bpy.types.Context, now: float) -> None:
         midpoint_heading = _runtime.travel_heading + turn * 0.5
         x, y = context.scene.arrietty_position
         context.scene.arrietty_position = (
-            x - math.sin(midpoint_heading) * advance,
-            y + math.cos(midpoint_heading) * advance,
+            x + math.cos(midpoint_heading) * advance,
+            y + math.sin(midpoint_heading) * advance,
         )
         _runtime.distance_m += advance
         _runtime.travel_heading = navigation._normalized_angle(
             _runtime.travel_heading + turn
         )
         _runtime.accumulated_turn += turn
-        _runtime.direction = (
-            -math.sin(_runtime.travel_heading),
-            math.cos(_runtime.travel_heading),
-        )
+        _runtime.direction = _direction_from_heading(_runtime.travel_heading)
         context.scene.arrietty_heading = navigation._normalized_angle(
             context.scene.arrietty_heading + turn
         )
+    if advance > 0.0 or altitude_changed:
         navigation.apply_base_pose(context, reset_running=False)
 
     if remaining <= 1.0e-6 or _runtime.distance_m >= _runtime.course_length_m - 1.0e-6:
@@ -325,13 +338,15 @@ def _advance_course(context: bpy.types.Context, now: float) -> None:
         if _runtime.stop_event is not None:
             _runtime.stop_event.set()
         steering.request_stop()
+        flight.reset(context)
+        navigation.apply_base_pose(context, reset_running=False)
         _play_finish_sound()
 
 
 def _timer_tick():
     """Drain worker events and update Blender data on the main thread."""
     now = time.monotonic()
-    _handle_worker_events(now)
+    _handle_worker_events(bpy.context, now)
     _advance_course(bpy.context, now)
     _tag_view3d_redraw()
 
@@ -350,8 +365,22 @@ def _ensure_timer() -> None:
     _runtime.timer_registered = True
 
 
-def start_trainer(context: bpy.types.Context, direction: Vector) -> None:
-    """Start a controller-steered ride using the initial HMD direction."""
+def _direction_from_heading(heading: float) -> tuple[float, float]:
+    """Return the XY vector for a standard Blender Z-axis heading."""
+    return (math.cos(heading), math.sin(heading))
+
+
+def _initialize_travel_state(context: bpy.types.Context) -> None:
+    """Initialize bicycle travel from the stored pose, never from HMD gaze."""
+    _runtime.start_position = tuple(context.scene.arrietty_position)
+    _runtime.travel_heading = navigation._normalized_angle(
+        context.scene.arrietty_heading
+    )
+    _runtime.direction = _direction_from_heading(_runtime.travel_heading)
+
+
+def start_trainer(context: bpy.types.Context) -> None:
+    """Start a ride using the stored bicycle heading, independent of HMD view."""
     _runtime.generation += 1
     generation = _runtime.generation
     while True:
@@ -367,13 +396,12 @@ def start_trainer(context: bpy.types.Context, direction: Vector) -> None:
     _runtime.power_w = 0
     _runtime.distance_m = 0.0
     _runtime.course_length_m = context.scene.arrietty_course_length
-    _runtime.start_position = tuple(context.scene.arrietty_position)
-    _runtime.direction = (direction.x, direction.y)
-    _runtime.travel_heading = math.atan2(-direction.x, direction.y)
+    _initialize_travel_state(context)
     _runtime.accumulated_turn = 0.0
     _runtime.last_sample_time = 0.0
     _runtime.last_tick_time = time.monotonic()
     _runtime.signal_received = False
+    flight.reset(context)
     _runtime.stop_event = threading.Event()
     _runtime.thread = threading.Thread(
         target=_ble_worker,
@@ -386,7 +414,7 @@ def start_trainer(context: bpy.types.Context, direction: Vector) -> None:
     _runtime.thread.start()
 
 
-def stop_trainer() -> None:
+def stop_trainer(context: bpy.types.Context | None = None) -> None:
     """Request a non-blocking trainer disconnect."""
     if _runtime.stop_event is not None:
         _runtime.stop_event.set()
@@ -395,6 +423,8 @@ def stop_trainer() -> None:
         _runtime.status = "STOPPING"
         _runtime.message = "Stopping trainer"
         _ensure_timer()
+    if context is not None and flight.reset(context):
+        navigation.apply_base_pose(context, reset_running=False)
 
 
 def get_runtime() -> _TrainerRuntime:
@@ -411,7 +441,7 @@ class ARRIETTY_OT_toggle_trainer(Operator):
 
     def execute(self, context: bpy.types.Context) -> set[str]:
         if _runtime.active:
-            stop_trainer()
+            stop_trainer(context)
             return {"FINISHED"}
 
         if sys.platform != "win32":
@@ -424,12 +454,7 @@ class ARRIETTY_OT_toggle_trainer(Operator):
             self.report({"ERROR"}, "Start the VR session before pressing Numpad 0")
             return {"CANCELLED"}
 
-        direction = navigation.get_hmd_forward(context)
-        if direction is None:
-            self.report({"ERROR"}, "The HMD forward direction is not available yet")
-            return {"CANCELLED"}
-
-        start_trainer(context, direction)
+        start_trainer(context)
         return {"FINISHED"}
 
 
@@ -480,7 +505,7 @@ def register() -> None:
 
 def unregister() -> None:
     """Stop BLE work and unregister trainer resources."""
-    stop_trainer()
+    stop_trainer(bpy.context)
     if bpy.app.timers.is_registered(_timer_tick):
         bpy.app.timers.unregister(_timer_tick)
     _runtime.timer_registered = False

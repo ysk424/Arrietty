@@ -7,7 +7,9 @@
 OpenVR pose reads run only while a trainer ride is active.  The first valid
 controller orientation after Numpad 0 becomes the straight-ahead reference.
 All shared values are plain Python data guarded by a lock; this module never
-touches Blender data from its worker thread.
+touches Blender data from its worker thread. The OpenVR client is retained for
+the Blender process lifetime so stopping a ride cannot tear down SteamVR while
+Blender's OpenXR session is still using it.
 """
 
 from dataclasses import dataclass
@@ -18,7 +20,7 @@ import time
 
 RIGHT_CONTROLLER_SERIAL = "LHR-9EFF8645"
 POLL_RATE_HZ = 60.0
-STEERING_GAIN = 0.35
+STEERING_GAIN = 0.50
 STEERING_DEADZONE_DEGREES = 1.5
 MAX_EFFECTIVE_STEERING_DEGREES = 15.0
 TRACKING_STALE_SECONDS = 0.5
@@ -55,6 +57,17 @@ class _SteeringRuntime:
 
 
 _runtime = _SteeringRuntime()
+_openvr_init_lock = threading.Lock()
+
+
+def _get_openvr_system(openvr):
+    """Initialize OpenVR once and reuse it across sequential rides."""
+    with _openvr_init_lock:
+        vr = getattr(openvr, "_arrietty_vr_system", None)
+        if vr is None:
+            vr = openvr.init(openvr.VRApplication_Background)
+            openvr._arrietty_vr_system = vr
+        return vr
 
 
 def _world_yaw_from_delta(current, baseline) -> float:
@@ -123,7 +136,7 @@ def _worker(stop_event: threading.Event) -> None:
     device_index = None
     period = 1.0 / POLL_RATE_HZ
     try:
-        vr = openvr.init(openvr.VRApplication_Background)
+        vr = _get_openvr_system(openvr)
         _publish(
             status="SEARCHING",
             message="Searching for the right VIVE controller",
@@ -212,11 +225,9 @@ def _worker(stop_event: threading.Event) -> None:
             effective_angle=0.0,
         )
     finally:
-        if vr is not None:
-            try:
-                openvr.shutdown()
-            except Exception:
-                pass
+        # Do not call openvr.shutdown() here. SteamVR's vrclient_x64.dll is
+        # shared with Blender's active OpenXR session and tearing it down at a
+        # course boundary can crash Blender. The OS releases it on process exit.
         if stop_event.is_set():
             _publish(
                 status="IDLE",

@@ -18,11 +18,11 @@ REPOSITORY_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_DIR.parent))
 
 import Arrietty  # noqa: E402
-from Arrietty import gui, navigation, steering, trainer  # noqa: E402
+from Arrietty import flight, gui, navigation, steering, trainer  # noqa: E402
 
 
 assert bpy.app.version >= (5, 2, 0)
-assert gui.VERSION == "0.5.0"
+assert gui.VERSION == "0.6.2"
 manifest = tomllib.loads(
     (REPOSITORY_DIR / "blender_manifest.toml").read_text(encoding="utf-8")
 )
@@ -46,6 +46,32 @@ assert sample is not None
 assert math.isclose(sample.speed_kmh, 20.16)
 assert sample.cadence_rpm == 92.0
 assert sample.power_w == 176
+
+assert flight.altitude_for_speed(0.0) == 0.0
+assert flight.altitude_for_speed(10.0) == 0.0
+assert math.isclose(flight.altitude_for_speed(10.1), 0.1)
+assert flight.altitude_for_speed(15.0) == 5.0
+assert flight.altitude_for_speed(20.0) == 10.0
+
+assert trainer.DEFAULT_COURSE_LENGTH_M == 572.0
+assert trainer.lap_counts(0.0, 572.0) == (0, 4)
+assert trainer.lap_counts(142.9, 572.0) == (0, 4)
+assert trainer.lap_counts(143.0, 572.0) == (1, 4)
+assert trainer.lap_counts(571.9, 572.0) == (3, 4)
+assert trainer.lap_counts(572.0, 572.0) == (4, 4)
+
+direction = trainer._direction_from_heading(0.0)
+assert math.isclose(direction[0], 1.0, abs_tol=1.0e-6)
+assert math.isclose(direction[1], 0.0, abs_tol=1.0e-6)
+direction = trainer._direction_from_heading(math.pi / 2.0)
+assert math.isclose(direction[0], 0.0, abs_tol=1.0e-6)
+assert math.isclose(direction[1], 1.0, abs_tol=1.0e-6)
+direction = trainer._direction_from_heading(math.pi)
+assert math.isclose(direction[0], -1.0, abs_tol=1.0e-6)
+assert math.isclose(direction[1], 0.0, abs_tol=1.0e-6)
+direction = trainer._direction_from_heading(-math.pi / 2.0)
+assert math.isclose(direction[0], 0.0, abs_tol=1.0e-6)
+assert math.isclose(direction[1], -1.0, abs_tol=1.0e-6)
 
 identity = (
     (1.0, 0.0, 0.0),
@@ -74,6 +100,30 @@ assert math.isclose(
     right_angle,
     abs_tol=1.0e-6,
 )
+assert math.isclose(
+    math.degrees(steering._effective_angle(left_angle)),
+    9.25,
+    abs_tol=1.0e-6,
+)
+
+
+class FakeOpenVR:
+    VRApplication_Background = 3
+
+    def __init__(self) -> None:
+        self.init_count = 0
+
+    def init(self, application_type):
+        assert application_type == self.VRApplication_Background
+        self.init_count += 1
+        return object()
+
+
+fake_openvr = FakeOpenVR()
+first_vr = steering._get_openvr_system(fake_openvr)
+second_vr = steering._get_openvr_system(fake_openvr)
+assert first_vr is second_vr
+assert fake_openvr.init_count == 1
 
 
 class FakeLayout:
@@ -106,10 +156,12 @@ Arrietty.register()
 try:
     assert hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
     assert hasattr(bpy.types, "ARRIETTY_OT_navigate")
+    assert hasattr(bpy.types, "ARRIETTY_OT_toggle_flight_mode")
     assert hasattr(bpy.types, "ARRIETTY_OT_toggle_trainer")
     assert hasattr(bpy.types, "ARRIETTY_PT_vr_session")
     assert hasattr(bpy.ops.arrietty, "toggle_vr_session")
     assert hasattr(bpy.ops.arrietty, "navigate")
+    assert hasattr(bpy.ops.arrietty, "toggle_flight_mode")
     assert hasattr(bpy.ops.arrietty, "toggle_trainer")
     assert hasattr(bpy.ops.wm, "xr_session_toggle")
 
@@ -118,10 +170,10 @@ try:
         SimpleNamespace(layout=stopped_layout),
         bpy.context,
     )
-    assert stopped_layout.labels[0]["text"] == "Version v0.5.0"
+    assert stopped_layout.labels[0]["text"] == "Version v0.6.2"
     assert stopped_layout.labels[1]["text"] == "Start Pose"
     assert "Z 1.50 m" in stopped_layout.labels[2]["text"]
-    assert len(stopped_layout.operators) == 2
+    assert len(stopped_layout.operators) == 3
     assert stopped_layout.operators[0][1]["text"] == "Dive into Secret World"
 
     original_is_running = gui._is_vr_session_running
@@ -131,7 +183,7 @@ try:
         SimpleNamespace(layout=running_layout),
         bpy.context,
     )
-    assert len(running_layout.operators) == 2
+    assert len(running_layout.operators) == 3
     assert running_layout.operators[0][1]["text"] == "Back to Real World"
     gui._is_vr_session_running = original_is_running
 
@@ -172,15 +224,29 @@ try:
     scene.arrietty_heading = 0.0
     scene.arrietty_move_step = 0.5
     scene.arrietty_turn_step = math.radians(5.0)
+    scene.arrietty_altitude = 0.0
 
     assert bpy.ops.arrietty.navigate(action="MOVE_FORWARD") == {"FINISHED"}
-    assert tuple(scene.arrietty_position) == (0.0, 0.5)
+    assert tuple(scene.arrietty_position) == (0.5, 0.0)
     assert bpy.context.window_manager.xr_session_settings.base_pose_type == "CUSTOM"
     assert tuple(bpy.context.window_manager.xr_session_settings.base_pose_location) == (
-        0.0,
         0.5,
+        0.0,
         navigation.EYE_HEIGHT_M,
     )
+
+    assert bpy.ops.arrietty.toggle_flight_mode() == {"FINISHED"}
+    assert flight.snapshot().enabled
+    assert flight.update_altitude(bpy.context, 15.0)
+    navigation.apply_base_pose(bpy.context, reset_running=False)
+    assert tuple(bpy.context.window_manager.xr_session_settings.base_pose_location) == (
+        0.5,
+        0.0,
+        navigation.EYE_HEIGHT_M + 5.0,
+    )
+    assert bpy.ops.arrietty.toggle_flight_mode() == {"FINISHED"}
+    assert not flight.snapshot().enabled
+    assert scene.arrietty_altitude == 0.0
 
     assert bpy.ops.arrietty.navigate(action="TURN_LEFT") == {"FINISHED"}
     assert math.isclose(
@@ -193,6 +259,7 @@ finally:
 
 assert not hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
 assert not hasattr(bpy.types, "ARRIETTY_OT_navigate")
+assert not hasattr(bpy.types, "ARRIETTY_OT_toggle_flight_mode")
 assert not hasattr(bpy.types, "ARRIETTY_OT_toggle_trainer")
 assert not hasattr(bpy.types, "ARRIETTY_PT_vr_session")
 

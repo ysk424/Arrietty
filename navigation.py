@@ -63,7 +63,7 @@ def _movement_forward(context: bpy.types.Context, body_heading: float) -> Vector
     hmd_forward = get_hmd_forward(context)
     if hmd_forward is not None:
         return hmd_forward
-    return Vector((-math.sin(body_heading), math.cos(body_heading), 0.0))
+    return Vector((math.cos(body_heading), math.sin(body_heading), 0.0))
 
 
 def apply_base_pose(context: bpy.types.Context, *, reset_running: bool = True) -> None:
@@ -71,9 +71,10 @@ def apply_base_pose(context: bpy.types.Context, *, reset_running: bool = True) -
     scene = context.scene
     settings = context.window_manager.xr_session_settings
     x, y = scene.arrietty_position
+    eye_height_m = EYE_HEIGHT_M + max(0.0, scene.arrietty_altitude)
 
     settings.base_pose_type = "CUSTOM"
-    settings.base_pose_location = (x, y, EYE_HEIGHT_M)
+    settings.base_pose_location = (x, y, eye_height_m)
     settings.base_pose_angle = scene.arrietty_heading
     settings.base_scale = 1.0
 
@@ -166,9 +167,18 @@ def _register_properties() -> None:
         subtype="ANGLE",
         unit="ROTATION",
     )
+    bpy.types.Scene.arrietty_altitude = FloatProperty(
+        name="Flight Altitude",
+        description="Current flight height above the ground",
+        default=0.0,
+        min=0.0,
+        unit="LENGTH",
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
 
 
 def _unregister_properties() -> None:
+    del bpy.types.Scene.arrietty_altitude
     del bpy.types.Scene.arrietty_turn_step
     del bpy.types.Scene.arrietty_move_step
     del bpy.types.Scene.arrietty_heading
