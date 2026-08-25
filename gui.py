@@ -12,7 +12,7 @@ from bpy.types import Operator, Panel
 from . import flight, navigation, ride_log, steering, trainer
 
 
-VERSION = "0.6.3"
+VERSION = "0.6.5"
 
 
 def _has_openxr_support() -> bool:
@@ -166,9 +166,9 @@ class ARRIETTY_PT_vr_session(Panel):
         trainer_box.operator(
             flight.ARRIETTY_OT_toggle_flight_mode.bl_idname,
             text=(
-                "Return to Ground (Numpad Enter)"
+                "Return to Ground (Numpad 7)"
                 if flight_state.enabled
-                else "Enable Flight (Numpad Enter)"
+                else "Enable Flight (Numpad 7)"
             ),
             icon="TRIA_DOWN" if flight_state.enabled else "TRIA_UP",
             depress=flight_state.enabled,

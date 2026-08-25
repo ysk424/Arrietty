@@ -87,10 +87,13 @@ def _ride_log_directory() -> Path:
 
 def _record_telemetry(context: bpy.types.Context, event: str = "SAMPLE") -> None:
     flight_state = flight.snapshot()
-    altitude_m = (
+    target_altitude_m = (
         flight.altitude_for_speed(_runtime.speed_kmh)
         if flight_state.enabled
         else 0.0
+    )
+    xr_base_z_m, xr_navigation_z_m, xr_viewer_z_m = navigation.get_xr_heights(
+        context
     )
     x, y = context.scene.arrietty_position
     ride_log.record(
@@ -104,7 +107,11 @@ def _record_telemetry(context: bpy.types.Context, event: str = "SAMPLE") -> None
             _runtime.course_length_m,
         ),
         flight_mode=flight_state.enabled,
-        altitude_m=altitude_m,
+        altitude_m=flight_state.altitude_m,
+        target_altitude_m=target_altitude_m,
+        xr_base_z_m=xr_base_z_m,
+        xr_navigation_z_m=xr_navigation_z_m,
+        xr_viewer_z_m=xr_viewer_z_m,
         x_m=x,
         y_m=y,
         heading_degrees=math.degrees(_runtime.travel_heading),

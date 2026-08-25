@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "arrietty"
-version = "0.6.3"
+version = "0.6.5"
 name = "Arrietty"
 tagline = "Enter Blender scenes through a SteamVR headset"
 maintainer = "ysk424"

@@ -22,6 +22,10 @@ _FIELDNAMES = (
     "laps_completed",
     "flight_mode",
     "altitude_m",
+    "target_altitude_m",
+    "xr_base_z_m",
+    "xr_navigation_z_m",
+    "xr_viewer_z_m",
     "x_m",
     "y_m",
     "heading_degrees",
@@ -37,6 +41,10 @@ class _RideLogRuntime:
 
 
 _runtime = _RideLogRuntime()
+
+
+def _optional_float(value: float | None, digits: int = 3) -> str:
+    return "" if value is None else f"{value:.{digits}f}"
 
 
 def start(directory: Path) -> Path:
@@ -66,6 +74,10 @@ def record(
     laps_completed: int = 0,
     flight_mode: bool = False,
     altitude_m: float = 0.0,
+    target_altitude_m: float = 0.0,
+    xr_base_z_m: float = 0.0,
+    xr_navigation_z_m: float | None = None,
+    xr_viewer_z_m: float | None = None,
     x_m: float = 0.0,
     y_m: float = 0.0,
     heading_degrees: float = 0.0,
@@ -85,6 +97,10 @@ def record(
             "laps_completed": laps_completed,
             "flight_mode": int(flight_mode),
             "altitude_m": f"{altitude_m:.3f}",
+            "target_altitude_m": f"{target_altitude_m:.3f}",
+            "xr_base_z_m": f"{xr_base_z_m:.3f}",
+            "xr_navigation_z_m": _optional_float(xr_navigation_z_m),
+            "xr_viewer_z_m": _optional_float(xr_viewer_z_m),
             "x_m": f"{x_m:.3f}",
             "y_m": f"{y_m:.3f}",
             "heading_degrees": f"{heading_degrees:.3f}",

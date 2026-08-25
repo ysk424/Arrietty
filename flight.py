@@ -14,6 +14,7 @@ from . import navigation
 
 TAKEOFF_SPEED_KMH = 10.0
 ALTITUDE_METERS_PER_KMH = 1.0
+FLIGHT_TOGGLE_KEY = "NUMPAD_7"
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,7 @@ def _register_keymaps() -> None:
     keymap = key_config.keymaps.new(name="3D View", space_type="VIEW_3D")
     item = keymap.keymap_items.new(
         ARRIETTY_OT_toggle_flight_mode.bl_idname,
-        type="NUMPAD_ENTER",
+        type=FLIGHT_TOGGLE_KEY,
         value="PRESS",
     )
     _addon_keymaps.append((keymap, item))
@@ -101,7 +102,7 @@ def _unregister_keymaps() -> None:
 
 
 def register() -> None:
-    """Register the flight toggle and Numpad Enter shortcut."""
+    """Register the flight toggle and Numpad 7 shortcut."""
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
     _register_keymaps()

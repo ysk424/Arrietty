@@ -66,22 +66,52 @@ def _movement_forward(context: bpy.types.Context, body_heading: float) -> Vector
     return Vector((math.cos(body_heading), math.sin(body_heading), 0.0))
 
 
+def _set_navigation_altitude(state, altitude_m: float) -> bool:
+    """Set the live XR navigation Z offset without accumulating deltas."""
+    location = tuple(state.navigation_location)
+    altitude_m = max(0.0, altitude_m)
+    if abs(location[2] - altitude_m) <= 1.0e-6:
+        return False
+    state.navigation_location = (location[0], location[1], altitude_m)
+    return True
+
+
+def get_xr_heights(
+    context: bpy.types.Context,
+) -> tuple[float, float | None, float | None]:
+    """Return base, live-navigation, and final viewer Z values for logging."""
+    base_z = float(context.window_manager.xr_session_settings.base_pose_location[2])
+    if not _is_vr_session_running(context):
+        return base_z, None, None
+    state = context.window_manager.xr_session_state
+    if state is None:
+        return base_z, None, None
+    return (
+        base_z,
+        float(state.navigation_location[2]),
+        float(state.viewer_pose_location[2]),
+    )
+
+
 def apply_base_pose(context: bpy.types.Context, *, reset_running: bool = True) -> None:
     """Apply the persistent Arrietty start pose to Blender's XR settings."""
     scene = context.scene
     settings = context.window_manager.xr_session_settings
     x, y = scene.arrietty_position
-    eye_height_m = EYE_HEIGHT_M + max(0.0, scene.arrietty_altitude)
+    altitude_m = max(0.0, scene.arrietty_altitude)
+    is_running = _is_vr_session_running(context)
+    state = context.window_manager.xr_session_state if is_running else None
+    eye_height_m = EYE_HEIGHT_M if state is not None else EYE_HEIGHT_M + altitude_m
 
     settings.base_pose_type = "CUSTOM"
     settings.base_pose_location = (x, y, eye_height_m)
     settings.base_pose_angle = scene.arrietty_heading
     settings.base_scale = 1.0
 
-    if reset_running and _is_vr_session_running(context):
-        state = context.window_manager.xr_session_state
-        if state is not None:
+    if state is not None:
+        if reset_running:
             state.reset_to_base_pose(context)
+        _set_navigation_altitude(state, altitude_m)
 
 
 class ARRIETTY_OT_navigate(Operator):
