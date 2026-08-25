@@ -2,5 +2,6 @@ __pycache__/
 *.py[cod]
 *.zip
 *.blend[0-9]
+arrietty_ride.csv
 .vscode/
 .idea/

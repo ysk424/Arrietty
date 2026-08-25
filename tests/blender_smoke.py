@@ -4,9 +4,11 @@
 
 """Registration smoke test executed with Blender in background mode."""
 
+import csv
 from pathlib import Path
 import math
 import sys
+import tempfile
 import tomllib
 from types import SimpleNamespace
 
@@ -18,11 +20,11 @@ REPOSITORY_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_DIR.parent))
 
 import Arrietty  # noqa: E402
-from Arrietty import flight, gui, navigation, steering, trainer  # noqa: E402
+from Arrietty import flight, gui, navigation, ride_log, steering, trainer  # noqa: E402
 
 
 assert bpy.app.version >= (5, 2, 0)
-assert gui.VERSION == "0.6.2"
+assert gui.VERSION == "0.6.3"
 manifest = tomllib.loads(
     (REPOSITORY_DIR / "blender_manifest.toml").read_text(encoding="utf-8")
 )
@@ -53,12 +55,46 @@ assert math.isclose(flight.altitude_for_speed(10.1), 0.1)
 assert flight.altitude_for_speed(15.0) == 5.0
 assert flight.altitude_for_speed(20.0) == 10.0
 
-assert trainer.DEFAULT_COURSE_LENGTH_M == 572.0
-assert trainer.lap_counts(0.0, 572.0) == (0, 4)
-assert trainer.lap_counts(142.9, 572.0) == (0, 4)
-assert trainer.lap_counts(143.0, 572.0) == (1, 4)
-assert trainer.lap_counts(571.9, 572.0) == (3, 4)
-assert trainer.lap_counts(572.0, 572.0) == (4, 4)
+assert trainer.DEFAULT_COURSE_LENGTH_M == 143.0
+assert trainer.completed_laps(0.0, 143.0) == 0
+assert trainer.completed_laps(142.9, 143.0) == 0
+assert trainer.completed_laps(143.0, 143.0) == 1
+assert trainer.completed_laps(571.9, 143.0) == 3
+assert trainer.completed_laps(572.0, 143.0) == 4
+
+with tempfile.TemporaryDirectory() as directory:
+    first_path = ride_log.start(Path(directory))
+    ride_log.record(
+        speed_kmh=15.0,
+        cadence_rpm=90.0,
+        power_w=175,
+        distance_m=12.5,
+        flight_mode=True,
+        altitude_m=5.0,
+        x_m=10.0,
+        y_m=-2.0,
+        heading_degrees=90.0,
+    )
+    ride_log.stop(event="BACK_TO_REAL_WORLD")
+    assert first_path.name == "arrietty_ride.csv"
+    with first_path.open(encoding="utf-8", newline="") as log_file:
+        first_rows = list(csv.DictReader(log_file))
+    assert [row["event"] for row in first_rows] == [
+        "START",
+        "SAMPLE",
+        "BACK_TO_REAL_WORLD",
+    ]
+    assert first_rows[1]["speed_kmh"] == "15.00"
+    assert first_rows[1]["flight_mode"] == "1"
+    assert first_rows[1]["altitude_m"] == "5.000"
+
+    second_path = ride_log.start(Path(directory))
+    ride_log.stop()
+    assert second_path == first_path
+    assert len(list(Path(directory).glob("*.csv"))) == 1
+    with second_path.open(encoding="utf-8", newline="") as log_file:
+        second_rows = list(csv.DictReader(log_file))
+    assert [row["event"] for row in second_rows] == ["START", "STOP"]
 
 direction = trainer._direction_from_heading(0.0)
 assert math.isclose(direction[0], 1.0, abs_tol=1.0e-6)
@@ -153,6 +189,10 @@ class FakeLayout:
 
 
 Arrietty.register()
+original_has_openxr_support = gui._has_openxr_support
+original_is_running = gui._is_vr_session_running
+original_stop_trainer = trainer.stop_trainer
+original_toggle_xr_session = gui._toggle_xr_session
 try:
     assert hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")
     assert hasattr(bpy.types, "ARRIETTY_OT_navigate")
@@ -170,13 +210,12 @@ try:
         SimpleNamespace(layout=stopped_layout),
         bpy.context,
     )
-    assert stopped_layout.labels[0]["text"] == "Version v0.6.2"
+    assert stopped_layout.labels[0]["text"] == "Version v0.6.3"
     assert stopped_layout.labels[1]["text"] == "Start Pose"
     assert "Z 1.50 m" in stopped_layout.labels[2]["text"]
     assert len(stopped_layout.operators) == 3
     assert stopped_layout.operators[0][1]["text"] == "Dive into Secret World"
 
-    original_is_running = gui._is_vr_session_running
     gui._is_vr_session_running = lambda _context: True
     running_layout = FakeLayout()
     gui.ARRIETTY_PT_vr_session.draw(
@@ -187,7 +226,6 @@ try:
     assert running_layout.operators[0][1]["text"] == "Back to Real World"
     gui._is_vr_session_running = original_is_running
 
-    original_has_openxr_support = gui._has_openxr_support
     gui._has_openxr_support = lambda: False
     reports = []
     result = gui.ARRIETTY_OT_toggle_vr_session.execute(
@@ -200,7 +238,6 @@ try:
     ]
     gui._has_openxr_support = original_has_openxr_support
 
-    original_toggle_xr_session = gui._toggle_xr_session
     gui._has_openxr_support = lambda: True
     gui._toggle_xr_session = lambda: {"CANCELLED"}
     reports = []
@@ -218,6 +255,31 @@ try:
     ]
     gui._has_openxr_support = original_has_openxr_support
     gui._toggle_xr_session = original_toggle_xr_session
+
+    stopped_events = []
+    gui._has_openxr_support = lambda: True
+    gui._is_vr_session_running = lambda _context: True
+    gui._toggle_xr_session = lambda: {"FINISHED"}
+    trainer.stop_trainer = lambda _context, **kwargs: stopped_events.append(
+        kwargs["log_event"]
+    )
+    result = gui.ARRIETTY_OT_toggle_vr_session.execute(
+        SimpleNamespace(report=lambda _level, _message: None),
+        bpy.context,
+    )
+    assert result == {"FINISHED"}
+    assert stopped_events == ["BACK_TO_REAL_WORLD"]
+    gui._has_openxr_support = original_has_openxr_support
+    gui._is_vr_session_running = original_is_running
+    gui._toggle_xr_session = original_toggle_xr_session
+    trainer.stop_trainer = original_stop_trainer
+
+    runtime = trainer.get_runtime()
+    runtime.status = "RIDING"
+    assert bpy.ops.arrietty.toggle_trainer() == {"FINISHED"}
+    assert runtime.status == "RIDING"
+    assert runtime.message == "Ride continues until Back to Real World"
+    runtime.status = "IDLE"
 
     scene = bpy.context.scene
     scene.arrietty_position = (0.0, 0.0)
@@ -255,6 +317,10 @@ try:
         abs_tol=1.0e-6,
     )
 finally:
+    trainer.stop_trainer = original_stop_trainer
+    gui._is_vr_session_running = original_is_running
+    gui._has_openxr_support = original_has_openxr_support
+    gui._toggle_xr_session = original_toggle_xr_session
     Arrietty.unregister()
 
 assert not hasattr(bpy.types, "ARRIETTY_OT_toggle_vr_session")

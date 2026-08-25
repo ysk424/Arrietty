@@ -7,6 +7,7 @@
 import asyncio
 from dataclasses import dataclass
 import math
+from pathlib import Path
 import queue
 import struct
 import sys
@@ -17,13 +18,13 @@ import bpy
 from bpy.props import FloatProperty
 from bpy.types import Operator
 
-from . import flight, navigation, steering
+from . import flight, navigation, ride_log, steering
 
 
 FTMS_INDOOR_BIKE_DATA = "00002ad2-0000-1000-8000-00805f9b34fb"
 T2_NAME_FRAGMENT = "t2"
 OVAL_LAP_LENGTH_M = 143.0
-DEFAULT_COURSE_LENGTH_M = OVAL_LAP_LENGTH_M * 4.0
+DEFAULT_COURSE_LENGTH_M = OVAL_LAP_LENGTH_M
 TIMER_INTERVAL_SECONDS = 0.05
 SAMPLE_STALE_SECONDS = 2.0
 PROVISIONAL_WHEELBASE_M = 1.05
@@ -73,13 +74,48 @@ _runtime = _TrainerRuntime()
 _addon_keymaps = []
 
 
-def lap_counts(distance_m: float, course_length_m: float) -> tuple[int, int]:
-    """Return completed and planned 143 m oval laps for the ride distance."""
-    total_laps = max(1, math.ceil(course_length_m / OVAL_LAP_LENGTH_M))
-    if distance_m >= course_length_m - 1.0e-6:
-        return total_laps, total_laps
-    completed_laps = min(int(distance_m / OVAL_LAP_LENGTH_M), total_laps)
-    return completed_laps, total_laps
+def completed_laps(distance_m: float, lap_length_m: float) -> int:
+    """Return the number of completed distance-based laps."""
+    return max(0, int(distance_m / max(1.0, lap_length_m)))
+
+
+def _ride_log_directory() -> Path:
+    if bpy.data.filepath:
+        return Path(bpy.data.filepath).parent
+    return Path(bpy.app.tempdir)
+
+
+def _record_telemetry(context: bpy.types.Context, event: str = "SAMPLE") -> None:
+    flight_state = flight.snapshot()
+    altitude_m = (
+        flight.altitude_for_speed(_runtime.speed_kmh)
+        if flight_state.enabled
+        else 0.0
+    )
+    x, y = context.scene.arrietty_position
+    ride_log.record(
+        event=event,
+        speed_kmh=_runtime.speed_kmh,
+        cadence_rpm=_runtime.cadence_rpm,
+        power_w=_runtime.power_w,
+        distance_m=_runtime.distance_m,
+        laps_completed=completed_laps(
+            _runtime.distance_m,
+            _runtime.course_length_m,
+        ),
+        flight_mode=flight_state.enabled,
+        altitude_m=altitude_m,
+        x_m=x,
+        y_m=y,
+        heading_degrees=math.degrees(_runtime.travel_heading),
+    )
+
+
+def _stop_ride_log(context: bpy.types.Context, event: str) -> None:
+    if not ride_log.is_active():
+        return
+    _record_telemetry(context, event=event)
+    ride_log.stop(event=None)
 
 
 def _take_unsigned(data: bytes | bytearray, offset: int, size: int):
@@ -204,15 +240,6 @@ def _play_start_sound() -> None:
     ).start()
 
 
-def _play_finish_sound() -> None:
-    threading.Thread(
-        target=_beep,
-        args=(((700, 180), (1000, 180), (1300, 500)),),
-        name="ArriettyFinishSound",
-        daemon=True,
-    ).start()
-
-
 def _tag_view3d_redraw() -> None:
     for window in bpy.context.window_manager.windows:
         screen = window.screen
@@ -259,6 +286,7 @@ def _handle_worker_events(context: bpy.types.Context, now: float) -> None:
                 else:
                     _runtime.status = "WAITING_STEERING"
                     _runtime.message = "T2 received; waiting for the right controller"
+            _record_telemetry(context)
         elif event_type == "error":
             _runtime.status = "ERROR"
             _runtime.message = str(payload)
@@ -266,6 +294,7 @@ def _handle_worker_events(context: bpy.types.Context, now: float) -> None:
             if _runtime.stop_event is not None:
                 _runtime.stop_event.set()
             steering.request_stop()
+            _stop_ride_log(context, "ERROR")
             if flight.reset(context):
                 navigation.apply_base_pose(context, reset_running=False)
         elif event_type == "worker_stopped":
@@ -282,6 +311,7 @@ def _handle_worker_events(context: bpy.types.Context, now: float) -> None:
             _runtime.message = steering_state.message
             if _runtime.stop_event is not None:
                 _runtime.stop_event.set()
+            _stop_ride_log(context, "STEERING_ERROR")
             if flight.reset(context):
                 navigation.apply_base_pose(context, reset_running=False)
 
@@ -307,8 +337,7 @@ def _advance_course(context: bpy.types.Context, now: float) -> None:
 
     altitude_changed = flight.update_altitude(context, speed_kmh)
 
-    remaining = max(0.0, _runtime.course_length_m - _runtime.distance_m)
-    advance = min(speed_kmh / 3.6 * elapsed, remaining)
+    advance = speed_kmh / 3.6 * elapsed
     if advance > 0.0:
         steering_angle = steering.get_effective_angle_radians()
         turn = advance / PROVISIONAL_WHEELBASE_M * math.tan(steering_angle)
@@ -329,18 +358,6 @@ def _advance_course(context: bpy.types.Context, now: float) -> None:
         )
     if advance > 0.0 or altitude_changed:
         navigation.apply_base_pose(context, reset_running=False)
-
-    if remaining <= 1.0e-6 or _runtime.distance_m >= _runtime.course_length_m - 1.0e-6:
-        _runtime.distance_m = _runtime.course_length_m
-        _runtime.status = "FINISHED"
-        _runtime.message = "Course end reached"
-        _runtime.speed_kmh = 0.0
-        if _runtime.stop_event is not None:
-            _runtime.stop_event.set()
-        steering.request_stop()
-        flight.reset(context)
-        navigation.apply_base_pose(context, reset_running=False)
-        _play_finish_sound()
 
 
 def _timer_tick():
@@ -381,6 +398,7 @@ def _initialize_travel_state(context: bpy.types.Context) -> None:
 
 def start_trainer(context: bpy.types.Context) -> None:
     """Start a ride using the stored bicycle heading, independent of HMD view."""
+    ride_log.start(_ride_log_directory())
     _runtime.generation += 1
     generation = _runtime.generation
     while True:
@@ -414,7 +432,11 @@ def start_trainer(context: bpy.types.Context) -> None:
     _runtime.thread.start()
 
 
-def stop_trainer(context: bpy.types.Context | None = None) -> None:
+def stop_trainer(
+    context: bpy.types.Context | None = None,
+    *,
+    log_event: str = "STOP",
+) -> None:
     """Request a non-blocking trainer disconnect."""
     if _runtime.stop_event is not None:
         _runtime.stop_event.set()
@@ -423,8 +445,12 @@ def stop_trainer(context: bpy.types.Context | None = None) -> None:
         _runtime.status = "STOPPING"
         _runtime.message = "Stopping trainer"
         _ensure_timer()
-    if context is not None and flight.reset(context):
-        navigation.apply_base_pose(context, reset_running=False)
+    if context is not None:
+        _stop_ride_log(context, log_event)
+        if flight.reset(context):
+            navigation.apply_base_pose(context, reset_running=False)
+    else:
+        ride_log.stop(event=log_event)
 
 
 def get_runtime() -> _TrainerRuntime:
@@ -433,15 +459,15 @@ def get_runtime() -> _TrainerRuntime:
 
 
 class ARRIETTY_OT_toggle_trainer(Operator):
-    """Start or stop receiving the CYCPLUS T2 trainer."""
+    """Start receiving the CYCPLUS T2 trainer for the active VR visit."""
 
     bl_idname = "arrietty.toggle_trainer"
-    bl_label = "Start or Stop CYCPLUS T2"
-    bl_description = "Connect the T2 and right controller, or stop the active ride"
+    bl_label = "Start CYCPLUS T2 Ride"
+    bl_description = "Connect the T2 and right controller until Back to Real World"
 
     def execute(self, context: bpy.types.Context) -> set[str]:
         if _runtime.active:
-            stop_trainer(context)
+            _runtime.message = "Ride continues until Back to Real World"
             return {"FINISHED"}
 
         if sys.platform != "win32":
@@ -454,7 +480,11 @@ class ARRIETTY_OT_toggle_trainer(Operator):
             self.report({"ERROR"}, "Start the VR session before pressing Numpad 0")
             return {"CANCELLED"}
 
-        start_trainer(context)
+        try:
+            start_trainer(context)
+        except OSError as error:
+            self.report({"ERROR"}, f"Could not start ride log: {error}")
+            return {"CANCELLED"}
         return {"FINISHED"}
 
 
@@ -463,8 +493,8 @@ _CLASSES = (ARRIETTY_OT_toggle_trainer,)
 
 def _register_properties() -> None:
     bpy.types.Scene.arrietty_course_length = FloatProperty(
-        name="Course Length",
-        description="Travel distance before the ride ends",
+        name="Lap Length",
+        description="Distance used for the completed-lap counter",
         default=DEFAULT_COURSE_LENGTH_M,
         min=1.0,
         soft_max=10000.0,

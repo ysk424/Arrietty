@@ -9,10 +9,10 @@ import math
 import bpy
 from bpy.types import Operator, Panel
 
-from . import flight, navigation, steering, trainer
+from . import flight, navigation, ride_log, steering, trainer
 
 
-VERSION = "0.6.2"
+VERSION = "0.6.3"
 
 
 def _has_openxr_support() -> bool:
@@ -77,6 +77,9 @@ class ARRIETTY_OT_toggle_vr_session(Operator):
             self.report({"ERROR"}, message)
             return {"CANCELLED"}
 
+        if was_running:
+            trainer.stop_trainer(context, log_event="BACK_TO_REAL_WORLD")
+
         return {"FINISHED"}
 
 
@@ -131,11 +134,15 @@ class ARRIETTY_PT_vr_session(Panel):
         trainer_box = layout.box()
         trainer_box.label(text="CYCPLUS T2")
         trainer_box.label(text="Ride direction follows Start Direction, not HMD view")
-        trainer_box.prop(context.scene, "arrietty_course_length", text="Course")
+        trainer_box.prop(context.scene, "arrietty_course_length", text="Lap")
         trainer_box.operator(
             trainer.ARRIETTY_OT_toggle_trainer.bl_idname,
-            text="Stop Ride" if runtime.active else "Start Ride (Numpad 0)",
-            icon="CANCEL" if runtime.active else "PLAY",
+            text=(
+                "Riding — Back to Real World to Stop"
+                if runtime.active
+                else "Start Ride (Numpad 0)"
+            ),
+            icon="REC" if runtime.active else "PLAY",
             depress=runtime.active,
         )
         trainer_box.label(text=f"Status: {runtime.status}")
@@ -146,14 +153,14 @@ class ARRIETTY_PT_vr_session(Panel):
                 f"{runtime.cadence_rpm:.0f} rpm   {runtime.power_w} W"
             )
         )
-        trainer_box.label(
-            text=f"Distance {runtime.distance_m:.1f} / {runtime.course_length_m:.1f} m"
-        )
-        completed_laps, total_laps = trainer.lap_counts(
+        trainer_box.label(text=f"Distance {runtime.distance_m:.1f} m")
+        laps_completed = trainer.completed_laps(
             runtime.distance_m,
             runtime.course_length_m,
         )
-        trainer_box.label(text=f"Laps {completed_laps} / {total_laps}")
+        trainer_box.label(text=f"Laps completed {laps_completed}")
+        log_state = " (recording)" if ride_log.is_active() else ""
+        trainer_box.label(text=f"Log: {ride_log.LOG_FILENAME}{log_state}")
 
         flight_state = flight.snapshot()
         trainer_box.operator(
