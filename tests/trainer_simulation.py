@@ -62,6 +62,7 @@ try:
     scene.arrietty_heading = 0.0
     runtime.status = "RIDING"
     runtime.speed_kmh = 36.0
+    runtime.ftms_speed_kmh = 36.0
     runtime.distance_m = 0.0
     runtime.course_length_m = 100.0
     runtime.start_position = (0.0, 0.0)
@@ -81,6 +82,7 @@ try:
     # A completed lap is only a checkpoint; it never stops the ride.
     runtime.status = "RIDING"
     runtime.speed_kmh = 36.0
+    runtime.ftms_speed_kmh = 36.0
     runtime.distance_m = 142.5
     runtime.course_length_m = 143.0
     runtime.direction = (1.0, 0.0)
@@ -100,6 +102,7 @@ try:
     # Crossing the configured lap distance also keeps moving without capping.
     runtime.status = "RIDING"
     runtime.speed_kmh = 36.0
+    runtime.ftms_speed_kmh = 36.0
     runtime.distance_m = 99.0
     runtime.course_length_m = 100.0
     runtime.start_position = (1.0, 2.0)
@@ -119,6 +122,7 @@ try:
     # A positive (left) steering angle must curve toward +Y from +X.
     runtime.status = "RIDING"
     runtime.speed_kmh = 36.0
+    runtime.ftms_speed_kmh = 36.0
     runtime.distance_m = 0.0
     runtime.course_length_m = 100.0
     runtime.start_position = (0.0, 0.0)
@@ -141,6 +145,7 @@ try:
     # Regression: a bicycle heading of -X must move along -X, not -Y.
     runtime.status = "RIDING"
     runtime.speed_kmh = 36.0
+    runtime.ftms_speed_kmh = 36.0
     runtime.distance_m = 0.0
     runtime.course_length_m = 100.0
     runtime.direction = (-1.0, 0.0)
@@ -161,6 +166,7 @@ try:
     # additional km/h adds one meter.
     runtime.status = "RIDING"
     runtime.speed_kmh = 20.0
+    runtime.ftms_speed_kmh = 20.0
     runtime.distance_m = 0.0
     runtime.course_length_m = 100.0
     runtime.travel_heading = 0.0
@@ -176,12 +182,36 @@ try:
     assert scene.arrietty_altitude == 10.0
 
     runtime.speed_kmh = 10.0
+    runtime.ftms_speed_kmh = 10.0
     now = time.monotonic()
     runtime.last_sample_time = now
     runtime.last_tick_time = now - 0.1
     trainer._advance_course(bpy.context, now)
     assert flight.snapshot().altitude_m == 0.0
     assert scene.arrietty_altitude == 0.0
+
+    # FTMS reports a long inertial coast on the T2. Physical CSC wheel
+    # rotation is authoritative for stopping the virtual bicycle.
+    assert bpy.ops.arrietty.toggle_flight_mode() == {"FINISHED"}
+    runtime.status = "RIDING"
+    runtime.speed_kmh = 20.0
+    runtime.ftms_speed_kmh = 20.0
+    runtime.distance_m = 12.0
+    runtime.travel_heading = 0.0
+    runtime.wheel_signal_received = True
+    runtime.wheel_revolutions = 10881
+    runtime.wheel_event_time_ticks = 44122
+    runtime.wheel_period_seconds = 0.25
+    now = time.monotonic()
+    runtime.last_sample_time = now
+    runtime.last_wheel_motion_time = now - 1.0
+    runtime.last_tick_time = now - 0.1
+    stopped_position = tuple(scene.arrietty_position)
+    trainer._advance_course(bpy.context, now)
+    assert runtime.speed_kmh == 0.0
+    assert runtime.distance_m == 12.0
+    assert tuple(scene.arrietty_position) == stopped_position
+    assert runtime.message == "Stopped; CSC wheel rotation is stationary"
 finally:
     navigation.apply_base_pose = original_apply_base_pose
     steering.is_tracking = original_is_tracking
@@ -189,6 +219,13 @@ finally:
     steering.snapshot = original_steering_snapshot
     runtime = trainer.get_runtime()
     runtime.status = "IDLE"
+    runtime.speed_kmh = 0.0
+    runtime.ftms_speed_kmh = 0.0
+    runtime.wheel_signal_received = False
+    runtime.wheel_revolutions = None
+    runtime.wheel_event_time_ticks = None
+    runtime.last_wheel_motion_time = 0.0
+    runtime.wheel_period_seconds = 0.0
     runtime.stop_event = None
     Arrietty.unregister()
 

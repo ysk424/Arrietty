@@ -39,6 +39,7 @@ class SteeringSnapshot:
     effective_angle_degrees: float
     sample_count: int
     last_pose_time: float
+    controller_offset_from_hmd: tuple[float, float, float] | None = None
 
 
 class _SteeringRuntime:
@@ -52,6 +53,7 @@ class _SteeringRuntime:
         self.effective_angle_degrees = 0.0
         self.sample_count = 0
         self.last_pose_time = 0.0
+        self.controller_offset_from_hmd = None
         self.stop_event: threading.Event | None = None
         self.thread: threading.Thread | None = None
 
@@ -99,6 +101,28 @@ def _rotation_tuple(matrix) -> tuple[tuple[float, float, float], ...]:
     )
 
 
+def _position_tuple(matrix) -> tuple[float, float, float]:
+    return tuple(float(matrix[row][3]) for row in range(3))
+
+
+def _relative_position(
+    controller_matrix,
+    hmd_matrix,
+) -> tuple[float, float, float]:
+    """Return controller position in HMD-local OpenVR coordinates."""
+    controller_position = _position_tuple(controller_matrix)
+    hmd_position = _position_tuple(hmd_matrix)
+    hmd_rotation = _rotation_tuple(hmd_matrix)
+    world_delta = tuple(
+        controller_position[index] - hmd_position[index]
+        for index in range(3)
+    )
+    return tuple(
+        sum(hmd_rotation[row][column] * world_delta[row] for row in range(3))
+        for column in range(3)
+    )
+
+
 def _publish(
     *,
     status: str | None = None,
@@ -107,6 +131,7 @@ def _publish(
     model: str | None = None,
     raw_angle: float | None = None,
     effective_angle: float | None = None,
+    controller_offset_from_hmd: tuple[float, float, float] | None = None,
     sample_received: bool = False,
 ) -> None:
     with _runtime.lock:
@@ -122,6 +147,8 @@ def _publish(
             _runtime.raw_angle_degrees = math.degrees(raw_angle)
         if effective_angle is not None:
             _runtime.effective_angle_degrees = math.degrees(effective_angle)
+        if controller_offset_from_hmd is not None:
+            _runtime.controller_offset_from_hmd = controller_offset_from_hmd
         if sample_received:
             _runtime.sample_count += 1
             _runtime.last_pose_time = time.monotonic()
@@ -184,6 +211,13 @@ def _worker(stop_event: threading.Event) -> None:
 
             if valid:
                 current = _rotation_tuple(pose.mDeviceToAbsoluteTracking)
+                hmd_pose = poses[openvr.k_unTrackedDeviceIndex_Hmd]
+                controller_offset_from_hmd = None
+                if hmd_pose.bDeviceIsConnected and hmd_pose.bPoseIsValid:
+                    controller_offset_from_hmd = _relative_position(
+                        pose.mDeviceToAbsoluteTracking,
+                        hmd_pose.mDeviceToAbsoluteTracking,
+                    )
                 if baseline is None:
                     baseline = current
                     filtered_angle = 0.0
@@ -198,6 +232,7 @@ def _worker(stop_event: threading.Event) -> None:
                     tracking=True,
                     raw_angle=filtered_angle,
                     effective_angle=effective,
+                    controller_offset_from_hmd=controller_offset_from_hmd,
                     sample_received=True,
                 )
             else:
@@ -251,6 +286,7 @@ def start() -> None:
         _runtime.effective_angle_degrees = 0.0
         _runtime.sample_count = 0
         _runtime.last_pose_time = 0.0
+        _runtime.controller_offset_from_hmd = None
         _runtime.stop_event = stop_event
         _runtime.thread = threading.Thread(
             target=_worker,
@@ -300,6 +336,7 @@ def snapshot() -> SteeringSnapshot:
             effective_angle_degrees=_runtime.effective_angle_degrees,
             sample_count=_runtime.sample_count,
             last_pose_time=last_pose_time,
+            controller_offset_from_hmd=_runtime.controller_offset_from_hmd,
         )
 
 

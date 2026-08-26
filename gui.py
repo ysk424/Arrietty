@@ -9,10 +9,10 @@ import math
 import bpy
 from bpy.types import Operator, Panel
 
-from . import flight, navigation, ride_log, steering, trainer
+from . import flight, instrument_panel, navigation, ride_log, steering, trainer
 
 
-VERSION = "0.6.5"
+VERSION = "0.7.9"
 
 
 def _has_openxr_support() -> bool:
@@ -79,6 +79,9 @@ class ARRIETTY_OT_toggle_vr_session(Operator):
 
         if was_running:
             trainer.stop_trainer(context, log_event="BACK_TO_REAL_WORLD")
+            instrument_panel.hide()
+        else:
+            instrument_panel.show(context)
 
         return {"FINISHED"}
 
@@ -112,7 +115,11 @@ class ARRIETTY_PT_vr_session(Panel):
         layout.label(text="Start Pose")
         x, y = context.scene.arrietty_position
         heading = math.degrees(context.scene.arrietty_heading)
-        eye_height_m = navigation.EYE_HEIGHT_M + context.scene.arrietty_altitude
+        eye_height_m = (
+            navigation.current_ground_height(context)
+            + navigation.EYE_HEIGHT_M
+            + context.scene.arrietty_altitude
+        )
         layout.label(text=f"X {x:.2f} m   Y {y:.2f} m   Z {eye_height_m:.2f} m")
         layout.label(text=f"Direction {heading:.1f} degrees")
 
@@ -147,12 +154,25 @@ class ARRIETTY_PT_vr_session(Panel):
         )
         trainer_box.label(text=f"Status: {runtime.status}")
         trainer_box.label(text=runtime.message)
+        trainer_box.label(text=f"T2 Control: {runtime.control_status}")
+        trainer_box.label(text=runtime.control_message)
+        for row_start in range(0, len(trainer.CONTROL_PRESETS), 4):
+            preset_row = trainer_box.row(align=True)
+            for preset in trainer.CONTROL_PRESETS[row_start:row_start + 4]:
+                button = preset_row.operator(
+                    trainer.ARRIETTY_OT_set_trainer_preset.bl_idname,
+                    text=f"P{preset.index} {preset.label}",
+                    depress=runtime.selected_control_preset == preset.index,
+                )
+                button.preset = preset.index
+        trainer_box.label(text="Resistance: 1 / 3 / 5 / 9, then Numpad +/-")
         trainer_box.label(
             text=(
                 f"{runtime.speed_kmh:.2f} km/h   "
                 f"{runtime.cadence_rpm:.0f} rpm   {runtime.power_w} W"
             )
         )
+
         trainer_box.label(text=f"Distance {runtime.distance_m:.1f} m")
         laps_completed = trainer.completed_laps(
             runtime.distance_m,
@@ -179,6 +199,26 @@ class ARRIETTY_PT_vr_session(Panel):
                 f"Altitude {flight_state.altitude_m:.1f} m"
             )
         )
+
+        layout.separator()
+        instrument_box = layout.box()
+        instrument_box.label(text="VR Instrument Panel")
+        panel_visible = instrument_panel.is_visible()
+        instrument_box.operator(
+            instrument_panel.ARRIETTY_OT_toggle_instrument_panel.bl_idname,
+            text="Hide Panel" if panel_visible else "Show Panel Preview",
+            icon="HIDE_ON" if panel_visible else "HIDE_OFF",
+            depress=panel_visible,
+        )
+        anchor, message = instrument_panel.status()
+        instrument_box.label(text=f"Anchor: {anchor}")
+        instrument_box.label(text=message)
+        row = instrument_box.row(align=True)
+        row.prop(context.scene, "arrietty_panel_forward_offset")
+        row.prop(context.scene, "arrietty_panel_side_offset")
+        row = instrument_box.row(align=True)
+        row.prop(context.scene, "arrietty_panel_height_offset")
+        row.prop(context.scene, "arrietty_panel_scale")
 
         steering_state = steering.snapshot()
         steering_box = layout.box()

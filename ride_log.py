@@ -16,6 +16,7 @@ _FIELDNAMES = (
     "elapsed_s",
     "event",
     "speed_kmh",
+    "ftms_speed_kmh",
     "cadence_rpm",
     "power_w",
     "distance_m",
@@ -29,6 +30,12 @@ _FIELDNAMES = (
     "x_m",
     "y_m",
     "heading_degrees",
+    "csc_wheel_revolutions",
+    "csc_wheel_event_time_ticks",
+    "csc_wheel_stopped",
+    "low_speed_coast_stopped",
+    "t2_control_status",
+    "t2_control_preset",
 )
 
 
@@ -68,6 +75,7 @@ def record(
     *,
     event: str = "SAMPLE",
     speed_kmh: float = 0.0,
+    ftms_speed_kmh: float = 0.0,
     cadence_rpm: float = 0.0,
     power_w: int = 0,
     distance_m: float = 0.0,
@@ -81,6 +89,12 @@ def record(
     x_m: float = 0.0,
     y_m: float = 0.0,
     heading_degrees: float = 0.0,
+    csc_wheel_revolutions: int | None = None,
+    csc_wheel_event_time_ticks: int | None = None,
+    csc_wheel_stopped: bool = False,
+    low_speed_coast_stopped: bool = False,
+    t2_control_status: str = "",
+    t2_control_preset: int | None = None,
 ) -> None:
     """Append and flush one telemetry row when logging is active."""
     if _runtime.writer is None or _runtime.file is None:
@@ -91,6 +105,7 @@ def record(
             "elapsed_s": f"{time.monotonic() - _runtime.started_at:.3f}",
             "event": event,
             "speed_kmh": f"{speed_kmh:.2f}",
+            "ftms_speed_kmh": f"{ftms_speed_kmh:.2f}",
             "cadence_rpm": f"{cadence_rpm:.1f}",
             "power_w": power_w,
             "distance_m": f"{distance_m:.3f}",
@@ -104,6 +119,19 @@ def record(
             "x_m": f"{x_m:.3f}",
             "y_m": f"{y_m:.3f}",
             "heading_degrees": f"{heading_degrees:.3f}",
+            "csc_wheel_revolutions": (
+                "" if csc_wheel_revolutions is None else csc_wheel_revolutions
+            ),
+            "csc_wheel_event_time_ticks": (
+                "" if csc_wheel_event_time_ticks is None
+                else csc_wheel_event_time_ticks
+            ),
+            "csc_wheel_stopped": int(csc_wheel_stopped),
+            "low_speed_coast_stopped": int(low_speed_coast_stopped),
+            "t2_control_status": t2_control_status,
+            "t2_control_preset": (
+                "" if t2_control_preset is None else t2_control_preset
+            ),
         }
     )
     _runtime.file.flush()

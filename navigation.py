@@ -15,6 +15,9 @@ from mathutils import Quaternion, Vector
 EYE_HEIGHT_M = 1.5
 DEFAULT_MOVE_STEP_M = 0.5
 DEFAULT_TURN_STEP_DEGREES = 5.0
+RIDE_SURFACE_TAG = "secret_world_ride_surface"
+GROUND_RAY_START_Z_M = 10000.0
+GROUND_RAY_DISTANCE_M = 20000.0
 
 _KEYMAP_ITEMS = (
     ("NUMPAD_4", "TURN_LEFT"),
@@ -23,6 +26,7 @@ _KEYMAP_ITEMS = (
     ("NUMPAD_2", "MOVE_BACKWARD"),
 )
 _addon_keymaps = []
+_ground_height_cache: dict[int, tuple[float, float, float]] = {}
 
 
 def _normalized_angle(angle: float) -> float:
@@ -93,15 +97,100 @@ def get_xr_heights(
     )
 
 
+def _scene_cache_key(scene) -> int:
+    try:
+        return int(scene.as_pointer())
+    except AttributeError:
+        return id(scene)
+
+
+def scene_uses_ride_surfaces(context: bpy.types.Context) -> bool:
+    """Return whether Secret World supplied explicit bicycle surfaces."""
+    return any(
+        obj.type == "MESH" and bool(obj.get(RIDE_SURFACE_TAG, False))
+        for obj in getattr(context.scene, "objects", ())
+    )
+
+
+def ride_surface_height(
+    context: bpy.types.Context,
+    x_m: float,
+    y_m: float,
+) -> float | None:
+    """Return the highest tagged ride-surface height under an XY position."""
+    surfaces = [
+        obj
+        for obj in getattr(context.scene, "objects", ())
+        if obj.type == "MESH" and bool(obj.get(RIDE_SURFACE_TAG, False))
+    ]
+    if not surfaces:
+        return None
+    try:
+        depsgraph = context.evaluated_depsgraph_get()
+    except (AttributeError, RuntimeError):
+        return None
+
+    world_origin = Vector((x_m, y_m, GROUND_RAY_START_Z_M))
+    world_direction = Vector((0.0, 0.0, -1.0))
+    highest = None
+    for original in surfaces:
+        try:
+            evaluated = original.evaluated_get(depsgraph)
+            inverse = evaluated.matrix_world.inverted_safe()
+            local_origin = inverse @ world_origin
+            local_direction = (inverse.to_3x3() @ world_direction).normalized()
+            hit, location, _normal, _face_index = evaluated.ray_cast(
+                local_origin,
+                local_direction,
+                distance=GROUND_RAY_DISTANCE_M,
+            )
+        except (AttributeError, RuntimeError, ValueError):
+            continue
+        if not hit:
+            continue
+        world_height = float((evaluated.matrix_world @ location).z)
+        if highest is None or world_height > highest:
+            highest = world_height
+    if highest is not None:
+        _ground_height_cache[_scene_cache_key(context.scene)] = (
+            x_m,
+            y_m,
+            highest,
+        )
+    return highest
+
+
+def current_ground_height(context: bpy.types.Context) -> float:
+    """Resolve ground under the bicycle, retaining the last valid surface height."""
+    scene = context.scene
+    key = _scene_cache_key(scene)
+    if not scene_uses_ride_surfaces(context):
+        _ground_height_cache.pop(key, None)
+        return 0.0
+    x_m, y_m = scene.arrietty_position
+    cached = _ground_height_cache.get(key)
+    if cached is not None:
+        cached_x, cached_y, cached_height = cached
+        if math.hypot(x_m - cached_x, y_m - cached_y) <= 1.0e-4:
+            return cached_height
+    height = ride_surface_height(context, x_m, y_m)
+    if height is not None:
+        return height
+    return cached[2] if cached is not None else 0.0
+
+
 def apply_base_pose(context: bpy.types.Context, *, reset_running: bool = True) -> None:
     """Apply the persistent Arrietty start pose to Blender's XR settings."""
     scene = context.scene
     settings = context.window_manager.xr_session_settings
     x, y = scene.arrietty_position
     altitude_m = max(0.0, scene.arrietty_altitude)
+    ground_height_m = current_ground_height(context)
     is_running = _is_vr_session_running(context)
     state = context.window_manager.xr_session_state if is_running else None
-    eye_height_m = EYE_HEIGHT_M if state is not None else EYE_HEIGHT_M + altitude_m
+    eye_height_m = ground_height_m + EYE_HEIGHT_M
+    if state is None:
+        eye_height_m += altitude_m
 
     settings.base_pose_type = "CUSTOM"
     settings.base_pose_location = (x, y, eye_height_m)
