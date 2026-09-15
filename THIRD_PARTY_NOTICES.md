@@ -1,10 +1,7 @@
 # Third-party notices
 
-Arrietty bundles the following Python wheels for Bluetooth Low Energy and SteamVR controller-pose support on Windows. Each wheel retains its own package metadata and applicable license information.
+Arrietty is licensed under GPL-3.0; see [LICENSE](LICENSE).
 
-- openvr 2.12.1401 — BSD License — https://github.com/cmbruns/pyopenvr
-- Bleak 3.0.2 — MIT License — https://github.com/hbldh/bleak
-- PyWinRT runtime and Windows projections 3.2.1 — MIT License — https://github.com/pywinrt/pywinrt
-- typing_extensions 4.16.0 — PSF-2.0 License — https://github.com/python/typing_extensions
+The locally used Godot engine is licensed under the MIT license. The small engine source patch preserved at `docs/patches/godot-gltf-vertex-colors.patch` contains context from Godot's glTF importer. Its license notice is preserved at [docs/patches/GODOT_LICENSE.txt](docs/patches/GODOT_LICENSE.txt).
 
-These components are independent libraries used by Arrietty and are not relicensed under GPL-3.0-or-later.
+Godot and Blender executables, San Marino source data, and generated scene caches are external to this repository. Their licenses and source attribution remain with their respective projects and source-data documentation. The Python packages formerly bundled for the retired Blender extension are no longer distributed in the current tree.

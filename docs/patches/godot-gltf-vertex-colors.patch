@@ -1,0 +1,41 @@
+diff --git a/modules/gltf/gltf_document.cpp b/modules/gltf/gltf_document.cpp
+index d9614bc335..21981eea4b 100644
+--- a/modules/gltf/gltf_document.cpp
++++ b/modules/gltf/gltf_document.cpp
+@@ -1411,7 +1411,6 @@ Error GLTFDocument::_parse_meshes(Ref<GLTFState> p_state) {
+ 
+ 		Ref<GLTFMesh> mesh;
+ 		mesh.instantiate();
+-		bool has_vertex_color = false;
+ 
+ 		ERR_FAIL_COND_V(!mesh_dict.has("primitives"), ERR_PARSE_ERROR);
+ 
+@@ -1432,6 +1431,9 @@ Error GLTFDocument::_parse_meshes(Ref<GLTFState> p_state) {
+ 		for (int j = 0; j < primitives.size(); j++) {
+ 			uint64_t flags = RSE::ARRAY_FLAG_COMPRESS_ATTRIBUTES;
+ 			Dictionary mesh_prim = primitives[j];
++			ERR_FAIL_COND_V(!mesh_prim.has("attributes"), ERR_PARSE_ERROR);
++			Dictionary a = mesh_prim["attributes"];
++			const bool has_vertex_color = a.has("COLOR_0");
+ 
+ 			// Read the material.
+ 			Ref<Material> mat;
+@@ -1479,10 +1481,6 @@ Error GLTFDocument::_parse_meshes(Ref<GLTFState> p_state) {
+ 			Array array;
+ 			array.resize(Mesh::ARRAY_MAX);
+ 
+-			ERR_FAIL_COND_V(!mesh_prim.has("attributes"), ERR_PARSE_ERROR);
+-
+-			Dictionary a = mesh_prim["attributes"];
+-
+ 			Mesh::PrimitiveType primitive = Mesh::PRIMITIVE_TRIANGLES;
+ 			if (mesh_prim.has("mode")) {
+ 				const int mode = mesh_prim["mode"];
+@@ -1629,7 +1627,6 @@ Error GLTFDocument::_parse_meshes(Ref<GLTFState> p_state) {
+ 			}
+ 			if (a.has("COLOR_0")) {
+ 				array[Mesh::ARRAY_COLOR] = _decode_accessor_as_color(p_state, a["COLOR_0"], indices_mapping);
+-				has_vertex_color = true;
+ 			}
+ 			if (a.has("JOINTS_0") && !a.has("JOINTS_1")) {
+ 				PackedInt32Array joints_0 = _decode_accessor_as_int32s(p_state, a["JOINTS_0"], indices_vec4_mapping);

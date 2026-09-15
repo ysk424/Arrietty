@@ -5,3 +5,8 @@ __pycache__/
 arrietty_ride.csv
 .vscode/
 .idea/
+.cache/
+.godot/
+*.uid
+.env
+*.log

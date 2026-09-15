@@ -1,0 +1,8 @@
+[gd_resource type="OpenXRActionMap" load_steps=2 format=3]
+
+[sub_resource type="OpenXRActionSet" id="ActionSet"]
+resource_name = "arrietty"
+localized_name = "Arrietty"
+
+[resource]
+action_sets = Array[OpenXRActionSet]([SubResource("ActionSet")])
